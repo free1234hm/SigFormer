@@ -65,7 +65,7 @@ Use `--scATACseq_path` to point to a directory containing single-cell ATAC-seq f
 
 ## 3. Run SigFormer
 
-Below are the parameters used to run the provided test datasets (human cancers), via `DeepPath_main.py`.
+Below are the parameters used to run the provided test datasets (human cancers), via `SigFormer_main.py`.
 
 ### Required input files
 
@@ -107,13 +107,13 @@ Below are the parameters used to run the provided test datasets (human cancers),
 **scRNA-seq inference example:** :
 
 ```bash
-python DeepPath_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad"
+python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad"
 ```
 
 **Multi-omics integration example:** :
 
 ```bash
-python DeepPath_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad" --scProteomics_path "./test data/scProteomics/Breast" --scATACseq_path "./test data/scATAC-seq/Breast"
+python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad" --scProteomics_path "./test data/scProteomics/Breast" --scATACseq_path "./test data/scATAC-seq/Breast"
 ```
 
 ## 4. Check Results
