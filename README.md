@@ -55,13 +55,13 @@ Provide scRNA-seq data as an .h5ad (AnnData) file.
 Use `--scProteomics_path` to point to a directory containing single-cell proteomics files in `.txt` format, where each file stores the protein expression profile for one cell type.
 
 - Each filename must exactly match the corresponding cell type name in `obs['celltype']`. Example: if `obs['celltype']` = "B_cell", the file must be `B_cell.txt`.
-- For example directory structure and file format, refer to: `test data/scProteomics/Breast`.
+- For example directory structure and file format, refer to: `test data/scProteomics`.
 
 ### Single-cell ATAC-seq input (optional):
 
 Use `--scATACseq_path` to point to a directory containing single-cell ATAC-seq files, where each file stores TFs activated in a specific cell type.
 
-- For examples of file format and directory structure, refer to: `test data/scATAC-seq/Breast`.
+- For examples of file format and directory structure, refer to: `test data/scATAC-seq`.
 
 ## 3. Run SigFormer
 
