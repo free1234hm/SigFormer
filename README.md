@@ -69,9 +69,9 @@ Below are the parameters used to run the provided test datasets (human cancers),
 
 ### Required input files
 
-- `scRNAseq_path` (`str`, default: `None`). Path to scRNA-seq data (an .h5ad file, or a folder containing .h5ad files).
-- `pathway_file` (`str`, default: `./reference library/Intracellular signaling.txt`). Curated intracellular signaling interactions.
-- `ligand_file` (`str`, default: `./reference library/Ligand_secreted&membrane.txt`). Curated ligand–receptor pairs.
+- **scRNAseq_path** (`str`, default: `None`). Path to scRNA-seq data (an .h5ad file, or a folder containing .h5ad files).
+- **pathway_file** (`str`, default: `./reference library/Intracellular signaling.txt`). Curated intracellular signaling interactions.
+- **ligand_file** (`str`, default: `./reference library/Ligand_secreted&membrane.txt`). Curated ligand–receptor pairs.
 
 ### Optional input files
 
