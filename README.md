@@ -8,7 +8,7 @@ SigFormer is a graph Transformer-based framework for reconstructing transcellula
 - Six classes of intracellular signaling events
 - Transcription factor (TF)–target gene regulation
 
-SigFormer uses scRNA-seq as the required input and can optionally integrate multi-omics and spatial data (if available) to refine pathway inference.
+SigFormer uses single-cell RNA sequencing (scRNA-seq) as the required input and can optionally integrate multi-omics and spatial data (if available) to refine pathway inference.
 
 ## 1. Installation:
 
