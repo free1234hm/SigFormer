@@ -69,14 +69,14 @@ Below are the parameters used to run the provided test datasets (human cancers),
 
 ### Required input files
 
-- **scRNAseq_path** (`str`, default: `None`). Path to scRNA-seq data (an .h5ad file, or a folder containing .h5ad files).
+- **scRNAseq_path** (`str`, default: `None`). Path to scRNA-seq data (an `.h5ad` file, or a folder containing `.h5ad` files).
 - **pathway_file** (`str`, default: `./reference library/Intracellular signaling.txt`). Curated intracellular signaling interactions.
 - **ligand_file** (`str`, default: `./reference library/Ligand_secreted&membrane.txt`). Curated ligand–receptor pairs.
 
 ### Optional input files
 
-- **scProteomics_path** (`str`, default: `None`). Path to scProteomics data (a folder containing cell-type-specific .txt files).
-- **scATACseq_path** (`str`, default: `None`). Path to scATAC-seq data (a folder containing cell-type-specific .txt files).
+- **scProteomics_path** (`str`, default: `None`). Path to scProteomics data (a folder containing cell-type-specific `.txt` files).
+- **scATACseq_path** (`str`, default: `None`). Path to scATAC-seq data (a folder containing cell-type-specific `.txt` files).
 
 ### Data preprocessing
 
@@ -85,7 +85,7 @@ Below are the parameters used to run the provided test datasets (human cancers),
 - **min_gene** (`float`, default: `0.01`). Cell filtering threshold: minimum fraction of genes a cell must express.
 - **min_cell_count** (`int`, default: `5`). Minimum cell count for each cell type (cell types below this are filtered out).
 - **normalize** (`bool`, default: `True`). Library-size normalization per cell.
-- **log_trans** (`bool`, default: `True`). Log-transform expression (log1p).
+- **log_trans** (`bool`, default: `True`). Log-transform expression.
 - **hvg_top_gene** (`int`, default: `5000`). Number of highly variable genes (HVGs) to keep.
 - **cell_top_gene** (`int`, default: `500`). Number of top expressed genes to keep per cell.
 
