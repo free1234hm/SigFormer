@@ -30,8 +30,8 @@ unzip "reference library.zip"
 Create a Python virtual environment with Conda and install the required packages.
 
 - `Numpy`: 1.26.4
-- `Scanpy`: 1.10.4 or above
-- `Anndata`: 0.11.1 or above
+- `Anndata`: 0.11.1
+- `Scanpy`: 1.10.4
 - `Torch (+CUDA118)`: torch 2.5.1 + cu118; torchvision 0.20.1 + cu118; torchaudio 2.5.1 + cu118
 - `torch geometric`: 2.6.1
 - `pyg-lib`: 0.4.0 + pt25cu118
@@ -41,9 +41,14 @@ Create a Python virtual environment with Conda and install the required packages
 **Example:**
 
 ```shell
-conda create -n sigformerEnv python=3.12 pip
+conda create -n sigformerEnv python=3.12.8 pip
 conda activate sigformerEnv
-pip install -r requirements.txt
+pip install numpy==1.26.4
+pip install anndata==0.11.1
+pip install scanpy==1.10.4
+pip install torch==2.5.1+cu118 torchvision==0.20.1+cu118 torchaudio==2.5.1+cu118 --index-url https://download.pytorch.org/whl/cu118
+pip install torch-geometric==2.6.1
+pip install pyg-lib torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.5.0+cu118.html
 ```
 
 ## 2. Prepare datasets
