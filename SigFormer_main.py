@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import gc
+import anndata
 import numpy as np
 import scanpy as sc
 import pandas as pd
@@ -20,7 +21,7 @@ from csn.Infer_pathway import infer_pathway
 
 
 def read_file(file_path, index_cell):
-    adata = sc.read_h5ad(file_path)
+    adata = anndata.read_h5ad(file_path)
 
     if "celltype" not in adata.obs.columns:
         if "cell_type" in adata.obs.columns:
