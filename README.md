@@ -21,6 +21,12 @@ git clone https://github.com/free1234hm/SigFormer.git
 cd SigFormer
 ```
 
+Unzip `reference library.zip` to ensure that the program runs correctly:
+
+```bash
+unzip "reference library.zip"
+```
+
 Create a Python virtual environment with Conda and install the required packages.
 
 - `Numpy`: 1.26.4
