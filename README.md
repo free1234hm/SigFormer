@@ -21,7 +21,7 @@ git clone https://github.com/free1234hm/SigFormer.git
 cd SigFormer
 ```
 
-Unzip `reference library.zip` to ensure that the program runs correctly:
+Unzip `reference library.zip` to enable SigFormer to access our curated reference signaling library:
 
 ```bash
 unzip "reference library.zip"
