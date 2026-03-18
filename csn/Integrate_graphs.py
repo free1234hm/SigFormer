@@ -1,4 +1,5 @@
 import numpy as np
+from collections import Counter
 from scipy.sparse import coo_matrix
 
 
@@ -38,6 +39,21 @@ def integrate_multiple_graphs(cell, adj_matrices, gene_lists, num_data):
     integrated_adj = coo_matrix((data, (rows, cols)), shape=(n_genes, n_genes))
 
     return integrated_adj, unified_genes
+
+
+def integrate_multiple_dicts(all_perturbation_results):
+    for cell_type in all_perturbation_results:
+        for ko_gene in all_perturbation_results[cell_type]:
+            gene_lists = all_perturbation_results[cell_type][ko_gene]
+            if len(gene_lists) == 1:
+                all_perturbation_results[cell_type][ko_gene] = gene_lists[0]
+            else:
+                flat_genes = [g for lst in gene_lists for g in lst]
+                counts = Counter(flat_genes)
+                merged_genes = [g for g, c in counts.items() if c >= min(10, max(2, len(gene_lists)/2))]
+                all_perturbation_results[cell_type][ko_gene] = merged_genes
+
+    return all_perturbation_results
 
 
 def get_consensus_graphs(adj_matrices, gene_lists, threshold):
