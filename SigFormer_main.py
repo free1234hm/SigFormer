@@ -45,53 +45,131 @@ def read_file(file_path, index_cell):
     return adata
 
 
-def preprocess(adata,
-               hvg_top_genes,
-               min_cell=0.01,
-               min_gene=0.01,
-               normalize: bool = True,
-               log_trans: bool = True
-               ):
+def _get_nonzero_values(X):
+    if sp.issparse(X):
+        return X.data
+    return np.ravel(X)
+
+
+def _cell_sums(X):
+    return np.asarray(X.sum(axis=1)).ravel()
+
+
+def detect_preprocessing(adata, norm_tol=0.05, integer_tol=1e-8):
+    # Scanpy commonly stores log1p info in adata.uns["log1p"]
+    if "log1p" in adata.uns:
+        return {
+            "normalized": True,
+            "log1p": True,
+            "certain": True,
+            "reason": 'Detected adata.uns["log1p"]'
+        }
+
+    # User/tool-defined metadata
+    pp_info = adata.uns.get("preprocessing", {})
+    if isinstance(pp_info, dict) and ("normalized" in pp_info or "log1p" in pp_info):
+        normalized = bool(pp_info.get("normalized", False))
+        log1p_done = bool(pp_info.get("log1p", False))
+        # Conservative rule: if log1p is explicitly marked, do not normalize again
+        if log1p_done:
+            normalized = True
+        return {
+            "normalized": normalized,
+            "log1p": log1p_done,
+            "certain": True,
+            "reason": 'Detected adata.uns["preprocessing"]'
+        }
+
+    # ------------------------------------------------------------------
+    # 2) Heuristic detection
+    # ------------------------------------------------------------------
+    X = adata.X
+    vals = _get_nonzero_values(X)
+
+    # Empty matrix or all-zero matrix
+    if vals.size == 0:
+        return {
+            "normalized": False,
+            "log1p": False,
+            "certain": False,
+            "reason": "Empty or all-zero matrix"
+        }
+
+    min_val = vals.min()
+    max_val = vals.max()
+
+    # Whether matrix contains fractional values
+    has_fraction = np.any(np.abs(vals - np.round(vals)) > integer_tol)
+
+    # Per-cell sums
+    sums = _cell_sums(X)
+    finite_sums = sums[np.isfinite(sums) & (sums > 0)]
+
+    if finite_sums.size == 0:
+        rel_sd = np.inf
+    else:
+        rel_sd = np.std(finite_sums) / (np.mean(finite_sums) + 1e-12)
+
+    looks_logged = (
+        (min_val >= 0) and
+        has_fraction and
+        (max_val < 50)
+    )
+
+    looks_normalized = rel_sd < norm_tol
+    if looks_logged:
+        looks_normalized = True
+
+    return {
+        "normalized": bool(looks_normalized),
+        "log1p": bool(looks_logged),
+        "certain": False
+    }
+
+
+def preprocess(
+    adata,
+    hvg_top_genes,
+    min_cell=0.01,
+    min_gene=0.01,
+    normalize=True,
+    log_trans=True,
+    target_sum=1e4,
+):
     try:
-        # Filter cells
+        state = detect_preprocessing(adata)
+        # --------------------------------------------------------------
+        # Filtering
+        # --------------------------------------------------------------
         min_genes = max(1, int(min_gene * adata.n_vars))
         sc.pp.filter_cells(adata, min_genes=min_genes)
 
-        # Filter genes
         min_cells = max(1, int(min_cell * adata.n_obs))
         sc.pp.filter_genes(adata, min_cells=min_cells)
 
-        # Normalize and Log Transformation
-        X = adata.X
-        max_val = X.max() if hasattr(X, "max") else np.max(X)
-        all_integer = np.all(np.mod(X.data if hasattr(X, "data") else X.ravel(), 1) == 0)
-        logtransformed = (max_val < 100) and not all_integer
+        # --------------------------------------------------------------
+        # Transform only when needed
+        # --------------------------------------------------------------
+        if normalize:
+            if state["log1p"]:
+                print("Skip cell normalization: input appears already log-transformed.")
+            elif state["normalized"]:
+                print("Skip cell normalization: input appears already normalized.")
+            else:
+                print(f"Run cell normalization (target_sum={target_sum})")
+                sc.pp.normalize_total(adata, target_sum=target_sum)
 
-        # detect normalization if raw counts are stored
-        raw_exists = hasattr(adata, "layers") and "counts" in adata.layers
-        if raw_exists:
-            raw = adata.layers["counts"]
-            cell_sums_raw = np.asarray(raw.sum(axis=1)).ravel()
-            normalized_previously = False  # raw exists implies normalization not applied to raw
-        else:
-            # if raw is not stored, we check per-cell totals in current adata
-            cell_sums = np.asarray(adata.X.sum(axis=1)).ravel()
-            normalized_previously = np.allclose(cell_sums, cell_sums[0], atol=1e-6)
+        if log_trans:
+            if state["log1p"]:
+                print("Skip log transformation: input appears already log-transformed.")
+            else:
+                print("Run log transformation")
+                sc.pp.log1p(adata)
 
-        if normalize and not normalized_previously and not logtransformed:
-            print("Run cell normalization")
-            sc.pp.normalize_total(adata)
-        if log_trans and not logtransformed:
-            print("Run log transformation")
-            sc.pp.log1p(adata)
-
-        '''
-        if "spatial" in adata.obsm:
-            coords = adata.obsm["spatial"]
-            scaler = MinMaxScaler()
-            normalized_coords = scaler.fit_transform(coords)
-            adata.obsm["spatial"] = normalized_coords
-        '''
+        # --------------------------------------------------------------
+        # HVG selection
+        # For Scanpy's common workflow, flavor="seurat" matches log1p data.
+        # --------------------------------------------------------------
         if adata.n_vars > hvg_top_genes:
             sc.pp.highly_variable_genes(adata, n_top_genes=hvg_top_genes)
             hvg_genes = adata.var[adata.var['highly_variable']].index
@@ -99,8 +177,10 @@ def preprocess(adata,
             return filter_adata
         else:
             return adata
+
     except Exception as e:
-        print('Error in identifying highly variable genes')
+        print(f"Error in preprocess: {e}")
+        raise
 
 
 def split_anndata(adata, block_size):
@@ -270,7 +350,7 @@ parser.add_argument('--block_size', type=int, default=5000, help='size of each s
 parser.add_argument('--random_seed', type=int, default=43, help='random seed')
 args = parser.parse_args()
 
-# args.scRNAseq_path = r".\test data\scRNA-seq/Data_Lee2020_Colorectal_SMC25.h5ad"
+# args.scRNAseq_path = r".\test data\scRNA-seq/Data_Chung2017_Breast_all.h5ad"
 
 if args.scRNAseq_path is None or not Path(args.scRNAseq_path).exists():
     print(f"Cannot find the scRNA-seq folder or file: {args.scRNAseq_path}")
