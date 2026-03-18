@@ -12,10 +12,10 @@ from scipy.sparse import coo_matrix
 from pathlib import Path
 from sklearn.cluster import KMeans
 from sklearn.neighbors import NearestNeighbors
-from csn.GAE import graph_processing, graph_processing_spatial
+from csn.GAE import graph_processing
 from csn.cell_net import csnet
 from read_data.read_interaction import pathway2, ligand_receptor
-from csn.Integrate_graphs import integrate_multiple_graphs
+from csn.Integrate_graphs import integrate_multiple_graphs, integrate_multiple_dicts
 from csn.Align_matrices import align_adjacency_matrices
 from csn.Infer_pathway import infer_pathway
 
@@ -263,14 +263,14 @@ parser.add_argument('--knn', type=int, default=10,
 parser.add_argument('--classification_accuracy', type=float, default=0.8, help='Threshold for cell classification')
 parser.add_argument('--edge_threshold', type=float, default=0.8, help='Threshold for edge reconstruction')
 parser.add_argument('--min_cell_count', type=int, default=5, help='Minimum cell count for each cell type')
-parser.add_argument('--max_length', type=int, default=5, help='max pathway length')
+parser.add_argument('--max_length', type=int, default=10, help='max pathway length')
 parser.add_argument('--num_epochs', type=int, default=20, help='training epochs')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate for model optimization')
 parser.add_argument('--block_size', type=int, default=5000, help='size of each segment block')
 parser.add_argument('--random_seed', type=int, default=43, help='random seed')
 args = parser.parse_args()
 
-# args.scRNAseq_path = r".\test data\scRNA-seq/Data_Wang2019_Glioblastoma_SF12090.h5ad"
+# args.scRNAseq_path = r".\test data\scRNA-seq/Data_Lee2020_Colorectal_SMC25.h5ad"
 
 if args.scRNAseq_path is None or not Path(args.scRNAseq_path).exists():
     print(f"Cannot find the scRNA-seq folder or file: {args.scRNAseq_path}")
@@ -281,6 +281,8 @@ if root.is_file():
     file_list = [root]
 else:
     file_list = list(root.rglob("*"))
+
+all_perturbation_results = {}
 
 for file in file_list:
     if file.suffix == ".h5ad":
@@ -317,8 +319,11 @@ for file in file_list:
                 print('Read pathway file...')
                 gene_list = sub_adata.var_names
                 gene_dict = {var: idx for idx, var in enumerate(gene_list)}
-                pathway_matrix, pathway_type, tf_dict = pathway2(args.pathway_file, gene_dict, col1_index=0, col2_index=1,
-                                                                 col3_index=2)
+                pathway_matrix, pathway_type, tf_dict = pathway2(args.pathway_file, gene_dict, col1_index=0,
+                                                                 col2_index=1, col3_index=2)
+
+                lg_set, rp_set, lgrp_matrix = ligand_receptor(args.ligand_file, gene_dict, 0, 1,
+                                                              2, 2)
 
                 unique_celltypes = sub_adata.obs['celltype'].unique()
                 cellid_count = len(unique_celltypes)
@@ -389,12 +394,25 @@ for file in file_list:
                             metric='euclidean'
                         )
                         if len(cell_neighbors) > 0:
-                            accuracy, adj_dict = graph_processing_spatial(data_list, subdata.obs_names, cell_neighbors,
-                                                                          out_dim=cellid_count,
-                                                                          num_epochs=args.num_epochs,
-                                                                          learning_rate=args.learning_rate,
-                                                                          min_cell_count=args.min_cell_count,
-                                                                          seed=args.random_seed)
+                            accuracy, adj_dict, perturbation_results = graph_processing(data_list=data_list,
+                                                                                        cell_idx=cell_neighbors,
+                                                                                        gene_names=gene_list,
+                                                                                        cell_labels=id_label,
+                                                                                        out_dim=cellid_count,
+                                                                                        num_epochs=args.num_epochs,
+                                                                                        learning_rate=args.learning_rate,
+                                                                                        min_cell_count=args.min_cell_count,
+                                                                                        seed=args.random_seed,
+                                                                                        knockout_gene_idx=rp_set)
+                            for cell_type, perturb in perturbation_results.items():
+                                if cell_type not in all_perturbation_results:
+                                    all_perturbation_results[cell_type] = {}
+                                for ko_gene, perturb_genes in perturb.items():
+                                    if ko_gene not in all_perturbation_results[cell_type]:
+                                        all_perturbation_results[cell_type][ko_gene] = []
+                                    all_perturbation_results[cell_type][ko_gene].append(perturb_genes)
+                            del perturbation_results
+
                             accuracy_sum = accuracy_sum + accuracy
                             for key, matrix in adj_dict.items():
                                 cell_name = id_label[key]
@@ -408,9 +426,25 @@ for file in file_list:
                         else:
                             print(f"No neighboring cells to {args.index_cell} were found.")
                     else:
-                        accuracy, adj_dict = graph_processing(data_list, subdata.obs_names,
-                                                              out_dim=cellid_count, num_epochs=args.num_epochs,
-                                                              min_cell_count=args.min_cell_count, seed=args.random_seed)
+                        accuracy, adj_dict, perturbation_results = graph_processing(data_list=data_list,
+                                                                                    cell_idx=range(len(data_list)),
+                                                                                    gene_names=gene_list,
+                                                                                    cell_labels=id_label,
+                                                                                    out_dim=cellid_count,
+                                                                                    num_epochs=args.num_epochs,
+                                                                                    learning_rate=args.learning_rate,
+                                                                                    min_cell_count=args.min_cell_count,
+                                                                                    seed=args.random_seed,
+                                                                                    knockout_gene_idx=rp_set)
+                        for cell_type, perturb in perturbation_results.items():
+                            if cell_type not in all_perturbation_results:
+                                all_perturbation_results[cell_type] = {}
+                            for ko_gene, perturb_genes in perturb.items():
+                                if ko_gene not in all_perturbation_results[cell_type]:
+                                    all_perturbation_results[cell_type][ko_gene] = []
+                                all_perturbation_results[cell_type][ko_gene].append(perturb_genes)
+                        del perturbation_results
+
                         accuracy_sum = accuracy_sum + accuracy
                         for key, matrix in adj_dict.items():
                             cell_name = id_label[key]
@@ -515,20 +549,25 @@ for file in file_list:
         final_matrix, unified_gene_list = align_adjacency_matrices(sum_matrix, sum_gene_lists)
         unified_gene_dict = {var: idx for idx, var in enumerate(unified_gene_list)}
 
+        all_perturbation_results = integrate_multiple_dicts(all_perturbation_results)
+        for key1 in list(all_perturbation_results.keys()):
+            new_inner = {}
+            for key2, gene_list in all_perturbation_results[key1].items():
+                ko_index = unified_gene_dict[key2]
+                gene_indices = [unified_gene_dict[g] for g in gene_list]
+                new_inner[ko_index] = gene_indices
+            all_perturbation_results[key1] = new_inner
+
         '''
-        Proteomics_dict = {}
-        for key, str_set in dict_Proteomics.items():
-            converted_set = {unified_gene_dict[s] for s in str_set if s in unified_gene_dict}
-            Proteomics_dict[key] = converted_set
-        scATACseq_dict = {}
-        for key, str_set in dict_ATACseq.items():
-            converted_set = {unified_gene_dict[s] for s in str_set if s in unified_gene_dict}
-            scATACseq_dict[key] = converted_set
+        for cell_type, perturbation in all_perturbation_results.items():
+            for ko_gene, sig_genes in perturbation.items():
+                print(f"{cell_type}\t{ko_gene}\t{len(sig_genes)}")
         '''
 
-        pathway_matrix, pathway_type, tf_dict = pathway2(args.pathway_file, unified_gene_dict, col1_index=0, col2_index=1,
-                                                         col3_index=2)
-        lgrp_matrix = ligand_receptor(args.ligand_file, unified_gene_dict, 0, 1, 2, 2)
+        pathway_matrix, pathway_type, tf_dict = pathway2(args.pathway_file, unified_gene_dict, col1_index=0,
+                                                         col2_index=1, col3_index=2)
+        _, _, lgrp_dict = ligand_receptor(args.ligand_file, unified_gene_dict,
+                                          col1_index=0, col2_index=1, col3_index=2, min_score=2)
 
         dict_gene = {}
         for cell, adj_cell in final_matrix.items():
@@ -557,13 +596,24 @@ for file in file_list:
         tftg_malignant = tftg_final[args.index_cell]
         pathway_malignant = pathway_final[args.index_cell]
         malignant_gene = dict_gene[args.index_cell]
+        if args.index_cell in all_perturbation_results:
+            malignant_perturbed_gene = all_perturbation_results[args.index_cell]
+        else:
+            print(f"No significantly perturbed genes identified in {args.index_cell}")
+            sys.exit(1)
+
         for cell, gene_set in dict_gene.items():
             if cell != args.index_cell:
                 print(f"Infer {cell} to {args.index_cell} pathway...")
-                shortest_other_to_malignant = infer_pathway(unified_gene_list, gene_set, lgrp_matrix, pathway_malignant,
-                                                            tftg_malignant, args.max_length)
-                if len(shortest_other_to_malignant) > 0:
-                    print(f"Found {len(shortest_other_to_malignant)} pathways from {cell} to {args.index_cell}")
+                other_to_malignant = infer_pathway(unified_gene_list,
+                                                   gene_set,
+                                                   malignant_perturbed_gene,
+                                                   lgrp_dict,
+                                                   pathway_malignant,
+                                                   tftg_malignant,
+                                                   args.max_length)
+                if len(other_to_malignant) > 0:
+                    print(f"Found {len(other_to_malignant)} pathways from {cell} to {args.index_cell}")
 
                     if cell in dict_Proteomics or args.index_cell in dict_Proteomics or args.index_cell in dict_ATACseq:
                         sender_protein = dict_Proteomics.get(cell, unified_gene_list)
@@ -574,7 +624,7 @@ for file in file_list:
                         output_file = os.path.join(recon_dir1, f'{cell}_to_{args.index_cell}_pathway.txt')
                         with open(output_file, 'w') as f:
                             f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
-                            for pathway in shortest_other_to_malignant:
+                            for pathway in other_to_malignant:
                                 col1 = pathway[0]  # Ligands
                                 col2 = pathway[1]  # Receptor
                                 col3 = pathway[2]  # Mediators
@@ -594,7 +644,7 @@ for file in file_list:
                         output_file = os.path.join(recon_dir1, f'{cell}_to_{args.index_cell}_pathway.txt')
                         with open(output_file, 'w') as f:
                             f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
-                            for pathway in shortest_other_to_malignant:
+                            for pathway in other_to_malignant:
                                 col1 = pathway[0]  # Ligands
                                 col2 = pathway[1]  # Receptor
                                 col3 = pathway[2]  # Mediators
@@ -602,14 +652,21 @@ for file in file_list:
                                 col5 = pathway[4]  # TGs
                                 f.write(f"{col1}\t{col2}\t{col3}\t{col4}\t{col5}\n")
 
-                if cell in pathway_final and cell in tftg_final:
+                if cell in pathway_final and cell in tftg_final and cell in all_perturbation_results:
                     print(f"Infer {args.index_cell} to {cell} pathway...")
                     adj_pathway = pathway_final[cell]
                     adj_tftg = tftg_final[cell]
-                    shortest_malignant_to_other = infer_pathway(unified_gene_list, malignant_gene, lgrp_matrix, adj_pathway,
-                                                                adj_tftg, args.max_length)
-                    if len(shortest_malignant_to_other) > 0:
-                        print(f"Found {len(shortest_malignant_to_other)} pathways from {args.index_cell} to {cell}")
+                    perturbed_gene = all_perturbation_results[cell]
+
+                    malignant_to_other = infer_pathway(unified_gene_list,
+                                                       malignant_gene,
+                                                       perturbed_gene,
+                                                       lgrp_dict,
+                                                       adj_pathway,
+                                                       adj_tftg,
+                                                       args.max_length)
+                    if len(malignant_to_other) > 0:
+                        print(f"Found {len(malignant_to_other)} pathways from {args.index_cell} to {cell}")
 
                         if args.index_cell in dict_Proteomics or cell in dict_Proteomics or cell in dict_ATACseq:
                             sender_protein = dict_Proteomics.get(args.index_cell, unified_gene_list)
@@ -620,7 +677,7 @@ for file in file_list:
                             output_file = os.path.join(recon_dir1, f'{args.index_cell}_to_{cell}_pathway.txt')
                             with open(output_file, 'w') as f:
                                 f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
-                                for pathway in shortest_malignant_to_other:
+                                for pathway in malignant_to_other:
                                     col1 = pathway[0]  # Ligands
                                     col2 = pathway[1]  # Receptor
                                     col3 = pathway[2]  # Mediators
@@ -640,12 +697,11 @@ for file in file_list:
                             output_file = os.path.join(recon_dir1, f'{args.index_cell}_to_{cell}_pathway.txt')
                             with open(output_file, 'w') as f:
                                 f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
-                                for pathway in shortest_malignant_to_other:
+                                for pathway in malignant_to_other:
                                     col1 = pathway[0]  # Ligands
                                     col2 = pathway[1]  # Receptor
                                     col3 = pathway[2]  # Mediators
                                     col4 = pathway[3]  # TF
                                     col5 = pathway[4]  # TGs
                                     f.write(f"{col1}\t{col2}\t{col3}\t{col4}\t{col5}\n")
-
         print(f'{file} Signaling Pathway Inference Done')
