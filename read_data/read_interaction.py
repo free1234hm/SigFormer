@@ -86,6 +86,8 @@ def pathway2(directory, gene_dict, col1_index: int = 0, col2_index: int = 1, col
 
 
 def ligand_receptor(directory, gene_dict, col1_index: int = 0, col2_index: int = 1, col3_index: int = 2, min_score: int = 1):
+    lg_set = set()
+    rp_set = set()
     lg_rp = {}
     if os.path.isfile(directory):  # Check if it's a file (not a directory)
         with open(directory, 'r', encoding='utf-8') as file:
@@ -97,10 +99,12 @@ def ligand_receptor(directory, gene_dict, col1_index: int = 0, col2_index: int =
                 score = elements[col3_index]
                 if int(score) >= min_score and gene1 in gene_dict and gene2 in gene_dict:
                     idx1, idx2 = gene_dict[gene1], gene_dict[gene2]
+                    lg_set.add(idx1)
+                    rp_set.add(idx2)
                     if idx1 not in lg_rp:
                         lg_rp[idx1] = set()  # Create a new set if it doesn't exist
                     lg_rp[idx1].add(idx2)
-        return lg_rp
+        return lg_set, rp_set, lg_rp
     else:
         print("Error: The reference network file does not exist.")
-        return lg_rp
+        return lg_set, rp_set, lg_rp
