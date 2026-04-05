@@ -350,7 +350,7 @@ parser.add_argument('--block_size', type=int, default=5000, help='size of each s
 parser.add_argument('--random_seed', type=int, default=43, help='random seed')
 args = parser.parse_args()
 
-# args.scRNAseq_path = r".\test data\scRNA-seq/Data_Chung2017_Breast_all.h5ad"
+# args.scRNAseq_path = r"D:\combined_h5ad_data\Data_Brain/Glioblastoma_primary.h5ad"
 
 if args.scRNAseq_path is None or not Path(args.scRNAseq_path).exists():
     print(f"Cannot find the scRNA-seq folder or file: {args.scRNAseq_path}")
@@ -633,10 +633,12 @@ for file in file_list:
         for key1 in list(all_perturbation_results.keys()):
             new_inner = {}
             for key2, gene_list in all_perturbation_results[key1].items():
-                ko_index = unified_gene_dict[key2]
-                gene_indices = [unified_gene_dict[g] for g in gene_list]
-                new_inner[ko_index] = gene_indices
-            all_perturbation_results[key1] = new_inner
+                if key2 in unified_gene_dict:
+                    ko_index = unified_gene_dict[key2]
+                    gene_indices = [unified_gene_dict[g] for g in gene_list if g in unified_gene_dict]
+                    new_inner[ko_index] = gene_indices
+            if len(new_inner) > 0:
+                all_perturbation_results[key1] = new_inner
 
         '''
         for cell_type, perturbation in all_perturbation_results.items():
