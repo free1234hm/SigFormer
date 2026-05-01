@@ -51,6 +51,8 @@ pip install torch-geometric==2.6.1
 pip install pyg-lib torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.5.0+cu118.html
 ```
 
+On our local workstation (Intel Core i7-7800X CPU, 64 GB RAM, NVIDIA GeForce RTX 4090 24 GB), setting up the environment typically requires about 26 minutes, depending on internet speed and package source availability.
+
 ## 2. Prepare datasets
 
 ### scRNA-seq data (required):
@@ -128,6 +130,10 @@ python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_B
 ```bash
 python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad" --scProteomics_path "./test data/scProteomics/Breast" --scATACseq_path "./test data/scATAC-seq/Breast"
 ```
+
+The runtime of SigFormer depends on the number of cells and the number of highly variable genes (HVGs) retained for analysis. On our local workstation (Intel Core i7-7800X CPU, 64 GB RAM, NVIDIA GeForce RTX 4090 24 GB), using 5,000 HVGs, eight cancer test samples containing 107–2,527 cells required 149–3,598 s to run, as detailed below.
+
+![](https://github.com/free1234hm/SigFormer/blob/main/runtime.png)
 
 ## 4. Check Results
 
