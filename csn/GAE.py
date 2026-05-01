@@ -14,8 +14,8 @@ from torch_geometric.nn import TransformerConv, InnerProductDecoder
 from sklearn.metrics import accuracy_score, f1_score
 
 
-output_dir = "./perturbation_debug"
-os.makedirs(output_dir, exist_ok=True)
+# output_dir = "./perturbation_debug"
+# os.makedirs(output_dir, exist_ok=True)
 
 
 def set_random_seed(seed):
@@ -219,6 +219,34 @@ def aggregate_distances_by_label(distance_dict, agg='median'):
             aggregated[label] = mat.median(dim=0).values.cpu().numpy()
     return aggregated
 
+def collect_observed_knockout_scores_single_gene_fast(
+    model,
+    cell_cache,
+    device,
+    knockout_gene_idx
+):
+    """
+    加速版真实 KO 分数收集。
+    """
+    obs_distance_dict = {}
+
+    for item in cell_cache:
+        dist = compute_knockout_distances_from_cache(
+            model=model,
+            cache_item=item,
+            knockout_gene_idx=knockout_gene_idx,
+            device=device
+        )
+
+        if dist is None:
+            continue
+
+        label = item["label"]
+        if label not in obs_distance_dict:
+            obs_distance_dict[label] = []
+        obs_distance_dict[label].append(dist)
+
+    return obs_distance_dict
 
 def collect_observed_knockout_scores_single_gene(model, data_list, cell_idx,
                                                  device, knockout_gene_idx, only_correct=True):
@@ -266,6 +294,197 @@ def collect_observed_knockout_scores_single_gene(model, data_list, cell_idx,
 
     return obs_distance_dict
 
+def classify_from_z(model, z, device):
+    """
+    只用 z 做 cell type 分类，避免调用 model.forward() 中的 decoder。
+    这里保持你原来的 pooling + fc1/fc2 逻辑不变。
+    """
+    z = z.to(device)
+    y1, _ = torch.max(z, dim=1)
+    y1_1 = y1.unsqueeze(0)
+    y2 = F.relu(model.fc1(y1_1))
+    y = model.fc2(y2)
+    return y
+
+
+def get_active_genes_from_edge_index(edge_index_1, num_genes=None):
+    """
+    返回当前细胞正边网络中至少参与一条边的基因集合。
+    """
+    active = torch.unique(edge_index_1.reshape(-1)).cpu()
+    return set(active.tolist())
+
+
+def knockout_positive_edge_index(edge_index_1, knockout_gene_idx):
+    """
+    直接基于正边 edge_index_1 删除涉及 knockout_gene_idx 的边。
+    不再 clone edge_attr。
+    """
+    src = edge_index_1[0]
+    dst = edge_index_1[1]
+    keep_mask = (src != knockout_gene_idx) & (dst != knockout_gene_idx)
+    return edge_index_1[:, keep_mask]
+
+
+def encode_with_positive_edges(model, x, edge_index_1, device):
+    with torch.no_grad():
+        z = model.encode(x.to(device), edge_index_1.to(device))
+    return z.cpu()
+
+def prepare_perturbation_cell_cache(
+    model,
+    data_list,
+    cell_idx,
+    device,
+    only_correct=True
+):
+    """
+    预计算 perturbation 阶段需要反复使用的信息：
+    1. label
+    2. x
+    3. edge_index_1
+    4. 原始 z
+    5. active_genes
+    """
+    model.eval()
+    cell_cache = []
+
+    with torch.no_grad():
+        for idx in cell_idx:
+            data = data_list[idx]
+
+            edge_index_1, _ = filter_edges_by_weight(data.edge_index, data.edge_attr, 1)
+
+            if edge_index_1.shape[1] <= 1:
+                continue
+
+            label = int(data.y.cpu().item())
+
+            # 原始 z 只计算一次
+            z = encode_with_positive_edges(
+                model=model,
+                x=data.x,
+                edge_index_1=edge_index_1,
+                device=device
+            )
+
+            if only_correct:
+                y = classify_from_z(model, z, device)
+                pred = int(y.argmax(dim=1).cpu().item())
+                if pred != label:
+                    continue
+
+            active_genes = get_active_genes_from_edge_index(edge_index_1)
+
+            cell_cache.append({
+                "idx": idx,
+                "label": label,
+                "x": data.x.cpu(),
+                "edge_index_1": edge_index_1.cpu(),
+                "z": z.cpu(),
+                "active_genes": active_genes
+            })
+
+    print(f"Cached valid perturbation cells: {len(cell_cache)}")
+    return cell_cache
+
+def compute_knockout_distances_from_cache(model, cache_item, knockout_gene_idx, device):
+    """
+    基于缓存的单细胞信息计算 KO 后距离。
+    如果 knockout_gene_idx 不在该细胞正边网络中，返回 None。
+    """
+    if knockout_gene_idx not in cache_item["active_genes"]:
+        return None
+
+    edge_index_1 = cache_item["edge_index_1"]
+    edge_index_1_ko = knockout_positive_edge_index(edge_index_1, knockout_gene_idx)
+
+    if edge_index_1_ko.shape[1] <= 1:
+        return None
+
+    x_ko = cache_item["x"].clone()
+    x_ko[knockout_gene_idx] = 0.0
+
+    z_ko = encode_with_positive_edges(
+        model=model,
+        x=x_ko,
+        edge_index_1=edge_index_1_ko,
+        device=device
+    )
+
+    dist = torch.norm(cache_item["z"] - z_ko, p=2, dim=1)
+    return dist
+
+def collect_random_knockout_background_fast(
+    model,
+    cell_cache,
+    num_genes,
+    device,
+    num_random_knockouts=500,
+    agg='median',
+    seed=42,
+    candidate_genes=None
+):
+    """
+    加速版 random knockout background。
+
+    使用 cell_cache，避免：
+    1. 重复分类
+    2. 重复计算原始 z
+    3. 重复 clone edge_attr
+    """
+    rng = np.random.default_rng(seed)
+
+    if candidate_genes is None:
+        # 建议只从至少在某些细胞正边中出现过的基因里随机抽样
+        active_union = set()
+        for item in cell_cache:
+            active_union.update(item["active_genes"])
+        candidate_genes = np.array(sorted(active_union), dtype=int)
+    else:
+        candidate_genes = np.asarray(list(candidate_genes), dtype=int)
+
+    random_bg = {}
+
+    for b in range(num_random_knockouts):
+        rand_ko = int(rng.choice(candidate_genes, size=1, replace=False)[0])
+
+        dist_dict_b = {}
+
+        for item in cell_cache:
+            dist = compute_knockout_distances_from_cache(
+                model=model,
+                cache_item=item,
+                knockout_gene_idx=rand_ko,
+                device=device
+            )
+
+            if dist is None:
+                continue
+
+            label = item["label"]
+
+            if label not in dist_dict_b:
+                dist_dict_b[label] = []
+            dist_dict_b[label].append(dist)
+
+        agg_b = aggregate_distances_by_label(dist_dict_b, agg=agg)
+
+        for label, score_vec in agg_b.items():
+            if label not in random_bg:
+                random_bg[label] = []
+            random_bg[label].append(score_vec)
+
+        print("\r", end="")
+        print(f"Random knockout background: {b + 1}/{num_random_knockouts}", end="")
+
+    print()
+
+    for label in random_bg:
+        random_bg[label] = np.stack(random_bg[label], axis=0)
+        # print(f"Label {label}: random background shape = {random_bg[label].shape}")
+
+    return random_bg
 
 def collect_random_knockout_background(
     model,
@@ -515,28 +734,33 @@ def graph_processing(
 
     if knockout_gene_idx is not None and len(knockout_gene_idx) > 0:
         print('Start building random knockout background...')
-        shared_random_bg = collect_random_knockout_background(
+        cell_cache = prepare_perturbation_cell_cache(
             model=model,
-            cell_idx=cell_idx,
             data_list=data_list,
+            cell_idx=cell_idx,
+            device=device,
+            only_correct=only_correct_cells_for_perturbation
+        )
+
+        shared_random_bg = collect_random_knockout_background_fast(
+            model=model,
+            cell_cache=cell_cache,
+            num_genes=data_list[0].x.shape[0],
             device=device,
             num_random_knockouts=num_random_knockouts,
             agg=perturbation_agg,
-            seed=seed,
-            only_correct=only_correct_cells_for_perturbation
+            seed=seed
         )
 
         for ko_gene in knockout_gene_idx:
             print("\r", end="")
             print(f"Knockout analysis for receptor: {gene_names[ko_gene]}", end="")
 
-            obs_distance_dict = collect_observed_knockout_scores_single_gene(
+            obs_distance_dict = collect_observed_knockout_scores_single_gene_fast(
                 model=model,
-                data_list=data_list,
-                cell_idx=cell_idx,
+                cell_cache=cell_cache,
                 device=device,
-                knockout_gene_idx=ko_gene,
-                only_correct=only_correct_cells_for_perturbation
+                knockout_gene_idx=ko_gene
             )
             obs_scores = aggregate_distances_by_label(obs_distance_dict, agg=perturbation_agg)
 

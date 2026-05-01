@@ -48,7 +48,7 @@ def integrate_multiple_dicts(all_perturbation_results):
             if len(gene_lists) == 1:
                 all_perturbation_results[cell_type][ko_gene] = gene_lists[0]
             else:
-                flat_genes = [g for lst in gene_lists for g in lst]
+                flat_genes = [g for lst in gene_lists for g in (lst if isinstance(lst, (list, tuple)) else [lst])]
                 counts = Counter(flat_genes)
                 merged_genes = [g for g, c in counts.items() if c >= min(10, max(2, len(gene_lists)/2))]
                 all_perturbation_results[cell_type][ko_gene] = merged_genes
