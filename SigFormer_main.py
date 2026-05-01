@@ -3,6 +3,7 @@ import sys
 import argparse
 import gc
 import anndata
+import time
 import numpy as np
 import scanpy as sc
 import pandas as pd
@@ -366,6 +367,7 @@ all_perturbation_results = {}
 
 for file in file_list:
     if file.suffix == ".h5ad":
+        start = time.time()
         adata = read_file(file_path=file, index_cell=args.index_cell)
         label_sample = adata.obs['sample'].unique()
 
@@ -786,4 +788,5 @@ for file in file_list:
                                     col4 = pathway[3]  # TF
                                     col5 = pathway[4]  # TGs
                                     f.write(f"{col1}\t{col2}\t{col3}\t{col4}\t{col5}\n")
-        print(f'{file} Signaling Pathway Inference Done')
+        end = time.time()
+        print(f'{file} signaling pathway inference done with {end - start:.4f} s')
