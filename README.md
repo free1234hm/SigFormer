@@ -122,13 +122,13 @@ Below are the parameters used to run the provided test datasets (human cancers),
 **scRNA-seq inference example:** :
 
 ```bash
-python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad"
+python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad" --pathway_file "./reference library/Intracellular signaling.txt" --ligand_file "./reference library/Ligand_secreted&membrane.txt"
 ```
 
 **Multi-omics integration example:** :
 
 ```bash
-python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad" --scProteomics_path "./test data/scProteomics/Breast" --scATACseq_path "./test data/scATAC-seq/Breast"
+python SigFormer_main.py --scRNAseq_path "./test data/scRNA-seq/Data_Chung2017_Breast_all.h5ad" --scProteomics_path "./test data/scProteomics/Breast" --scATACseq_path "./test data/scATAC-seq/Breast" --pathway_file "./reference library/Intracellular signaling.txt" --ligand_file "./reference library/Ligand_secreted&membrane.txt"
 ```
 
 The runtime of SigFormer depends on the number of cells and the number of highly variable genes (HVGs) retained for analysis. On our local workstation (Intel Core i7-7800X CPU, 64 GB RAM, NVIDIA GeForce RTX 4090 24 GB), using 5,000 HVGs, eight cancer test samples containing 107–2,527 cells required 149–3,598 s to run, as detailed below.
