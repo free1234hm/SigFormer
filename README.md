@@ -149,6 +149,8 @@ Each pathway file is a tab-delimited text file, with one pathway per line and fi
 - Multiple shortest paths of equal length are separated by semicolons `;`.
 - Nodes within a single shortest path are separated by underscores `_`.
 
+To reproduce SigFormer’s benchmark results on eight cancer evaluation datasets, navigate to the reproducing_benchmark directory and run Pathway_benchmark.py. The cancer-specific scRNA-seq datasets, pathway inference results, and positive reference sets are provided in the Evaluation_data, Pathway_file, and Positive_data directories, respectively.
+
 ## Contact:
 
 Han Mingfei: free1234hm@163.com
