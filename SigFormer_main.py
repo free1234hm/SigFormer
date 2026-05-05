@@ -351,10 +351,19 @@ parser.add_argument('--block_size', type=int, default=5000, help='size of each s
 parser.add_argument('--random_seed', type=int, default=43, help='random seed')
 args = parser.parse_args()
 
+
 # args.scRNAseq_path = r"D:\combined_h5ad_data\Data_Brain/Glioblastoma_primary.h5ad"
 
 if args.scRNAseq_path is None or not Path(args.scRNAseq_path).exists():
     print(f"Cannot find the scRNA-seq folder or file: {args.scRNAseq_path}")
+    sys.exit(1)
+
+if args.pathway_file is None or not Path(args.pathway_file).exists():
+    print(f"Cannot find the reference pathway file: {args.pathway_file}")
+    sys.exit(1)
+
+if args.ligand_file is None or not Path(args.ligand_file).exists():
+    print(f"Cannot find the reference ligand-receptor file: {args.ligand_file}")
     sys.exit(1)
 
 root = Path(args.scRNAseq_path)
@@ -719,11 +728,12 @@ for file in file_list:
                                     result_multiomics.append(line)
                                 f.write(line)
 
-                        output_file = os.path.join(recon_dir2, f'{cell}_to_{args.index_cell}_pathway.txt')
-                        with open(output_file, 'w') as f:
-                            f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
-                            for line in result_multiomics:
-                                f.write(line)
+                        if len(result_multiomics) > 0:
+                            output_file = os.path.join(recon_dir2, f'{cell}_to_{args.index_cell}_pathway.txt')
+                            with open(output_file, 'w') as f:
+                                f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
+                                for line in result_multiomics:
+                                    f.write(line)
                     else:
                         output_file = os.path.join(recon_dir1, f'{cell}_to_{args.index_cell}_pathway.txt')
                         with open(output_file, 'w') as f:
@@ -772,11 +782,12 @@ for file in file_list:
                                         result_multiomics.append(line)
                                     f.write(line)
 
-                            output_file = os.path.join(recon_dir2, f'{args.index_cell}_to_{cell}_pathway.txt')
-                            with open(output_file, 'w') as f:
-                                f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
-                                for line in result_multiomics:
-                                    f.write(line)
+                            if len(result_multiomics) > 0:
+                                output_file = os.path.join(recon_dir2, f'{args.index_cell}_to_{cell}_pathway.txt')
+                                with open(output_file, 'w') as f:
+                                    f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
+                                    for line in result_multiomics:
+                                        f.write(line)
                         else:
                             output_file = os.path.join(recon_dir1, f'{args.index_cell}_to_{cell}_pathway.txt')
                             with open(output_file, 'w') as f:
