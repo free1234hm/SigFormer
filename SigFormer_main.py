@@ -21,6 +21,18 @@ from csn.Align_matrices import align_adjacency_matrices
 from csn.Infer_pathway import infer_pathway
 
 
+def str2bool(value):
+    if isinstance(value, bool):
+        return value
+
+    value = str(value).strip().lower()
+    if value in {"true", "1", "yes", "y", "t"}:
+        return True
+    if value in {"false", "0", "no", "n", "f"}:
+        return False
+    raise argparse.ArgumentTypeError("Expected a boolean value: true/false, yes/no, or 1/0")
+
+
 def read_file(file_path, index_cell):
     adata = anndata.read_h5ad(file_path)
 
@@ -313,6 +325,75 @@ def find_knn_indices(
     return selected_idx_list
 
 
+def read_scproteomics_inputs(scProteomics_path):
+    if scProteomics_path is None:
+        print('No scProteomics data input')
+        return {}
+
+    root = Path(scProteomics_path)
+    if not root.exists():
+        raise FileNotFoundError(f"Cannot find scProteomics path: {root}")
+
+    files = [root] if root.is_file() else [ff for ff in root.rglob("*") if ff.is_file()]
+    if len(files) == 0:
+        raise FileNotFoundError(f"No scProteomics files found under: {root}")
+
+    dict_Proteomics = {}
+    for ff in files:
+        cell_name = ff.stem
+        protein_set = set()
+        with open(ff, 'r', encoding='utf-8') as f:
+            next(f, None)
+            for line_no, line in enumerate(f, start=2):
+                line = line.strip()
+                if not line:
+                    continue
+                elements = line.strip('"').split("\t")
+                if len(elements) < 2:
+                    raise ValueError(f"{ff} line {line_no}: expected at least 2 tab-delimited columns")
+                try:
+                    protein_value = float(elements[1])
+                except ValueError as exc:
+                    raise ValueError(f"{ff} line {line_no}: invalid protein value {elements[1]!r}") from exc
+                if protein_value > 0:
+                    protein_set.add(elements[0].strip('"'))
+        dict_Proteomics[cell_name] = protein_set
+
+    return dict_Proteomics
+
+
+def read_scatacseq_inputs(scATACseq_path):
+    if scATACseq_path is None:
+        print('No scATAC-seq data input')
+        return {}
+
+    root = Path(scATACseq_path)
+    if not root.exists():
+        raise FileNotFoundError(f"Cannot find scATAC-seq path: {root}")
+
+    files = [root] if root.is_file() else [ff for ff in root.rglob("*") if ff.is_file()]
+    if len(files) == 0:
+        raise FileNotFoundError(f"No scATAC-seq files found under: {root}")
+
+    dict_ATACseq = {}
+    for ff in files:
+        cell_name = ff.stem
+        tf_set = set()
+        with open(ff, 'r', encoding='utf-8') as f:
+            next(f, None)
+            for line_no, line in enumerate(f, start=2):
+                line = line.strip()
+                if not line:
+                    continue
+                elements = line.strip('"').split("\t")
+                if len(elements) < 1 or elements[0] == "":
+                    raise ValueError(f"{ff} line {line_no}: expected a TF name in the first column")
+                tf_set.add(elements[0].strip('"'))
+        dict_ATACseq[cell_name] = tf_set
+
+    return dict_ATACseq
+
+
 parser = argparse.ArgumentParser(description='Main entrance of SigFormer')
 parser.add_argument('--scRNAseq_path', type=str, default=None,
                     help='the path of scRNA-seq data')
@@ -330,15 +411,16 @@ parser.add_argument('--min_cell', type=float, default=0.01,
                     help='parameter for gene filtering')
 parser.add_argument('--min_gene', type=float, default=0.01,
                     help='parameter for cell filtering')
-parser.add_argument('--normalize', type=bool, default=True,
-                    help='normalize cells')
-parser.add_argument('--log_trans', type=bool, default=True,
-                    help='logarithm expression')
+parser.add_argument('--normalize', type=str2bool, nargs='?', const=True, default=True,
+                    help='normalize cells; accepts true/false, yes/no, or 1/0')
+parser.add_argument('--log_trans', type=str2bool, nargs='?', const=True, default=True,
+                    help='logarithm expression; accepts true/false, yes/no, or 1/0')
 parser.add_argument('--hvg_top_gene', type=int, default=5000,
                     help='take the top X highly variable genes (default: 5000)')
 parser.add_argument('--cell_top_gene', type=int, default=500,
                     help='take the top X genes expressed in each cell (default: 500)')
-parser.add_argument('--spatial', type=bool, default=False, help='using spatial information')
+parser.add_argument('--spatial', type=str2bool, nargs='?', const=True, default=False,
+                    help='using spatial information; accepts true/false, yes/no, or 1/0')
 parser.add_argument('--knn', type=int, default=10,
                     help='When spatial information is available, get the k nearest neighbors of each index cell')
 parser.add_argument('--classification_accuracy', type=float, default=0.8, help='Threshold for cell classification')
@@ -596,38 +678,12 @@ for file in file_list:
             sys.exit(1)
 
         ########################################## Pathway Reconstruction ####################################################
-        dict_Proteomics = {}
         try:
-            scProteomics_path = Path(args.scProteomics_path)
-            for ff in scProteomics_path.rglob("*"):
-                if ff.is_file():
-                    cell_name = ff.stem
-                    protein_set = set()
-                    with open(ff, 'r') as f:
-                        line = f.readline().strip()
-                        for line in f:
-                            elements = line.strip().strip('"').split("\t")
-                            if float(elements[1]) > 0:
-                                protein_set.add(elements[0])
-                    dict_Proteomics[cell_name] = protein_set
-        except Exception as e:
-            print(f'No scProteomics data input')
-
-        dict_ATACseq = {}
-        try:
-            scATACseq_path = Path(args.scATACseq_path)
-            for ff in scATACseq_path.rglob("*"):
-                if ff.is_file():
-                    cell_name = ff.stem
-                    tf_set = set()
-                    with open(ff, 'r') as f:
-                        line = f.readline().strip()
-                        for line in f:
-                            elements = line.strip().strip('"').split("\t")
-                            tf_set.add(elements[0])
-                    dict_ATACseq[cell_name] = tf_set
-        except Exception as e:
-            print(f'No scATAC-seq data input')
+            dict_Proteomics = read_scproteomics_inputs(args.scProteomics_path)
+            dict_ATACseq = read_scatacseq_inputs(args.scATACseq_path)
+        except (OSError, ValueError) as e:
+            print(f"Error reading optional multi-omics input: {e}")
+            sys.exit(1)
 
         sum_matrix = {}
         sum_gene_lists = {}

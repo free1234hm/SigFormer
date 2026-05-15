@@ -51,6 +51,12 @@ pip install torch-geometric==2.6.1
 pip install pyg-lib torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.5.0+cu118.html
 ```
 
+or use the environment file:
+
+```shell
+pip install -r requirements.txt
+```
+
 On our local workstation (Intel Core i7-7800X CPU, 64 GB RAM, NVIDIA GeForce RTX 4090 24 GB), setting up the environment typically requires about 26 minutes, depending on internet speed and package source availability.
 
 ## 2. Prepare datasets
