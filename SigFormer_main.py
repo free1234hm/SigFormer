@@ -235,24 +235,22 @@ def split_anndata(adata, block_size):
 
     return adata_splits
 
+
 def split_adjacency_matrix(adj_G, adj_type):
-    # Prepare lists for rows, columns, and data for matrices A and B
     A_rows, A_cols, A_data = [], [], []
     B_rows, B_cols, B_data = [], [], []
-    # Iterate over non-zero elements in adj_G
-    # adj_G_coo = adj_G.tocoo()  # Convert to COO format for easy iteration
+
     for i, j, value in zip(adj_G.row, adj_G.col, adj_G.data):
-        if value > 0:  # Only consider edges present in adj_G
+        if value > 0:
             if 'controls-expression-of' in adj_type[i, j]:
                 A_rows.append(i)
                 A_cols.append(j)
-                A_data.append(1)
+                A_data.append(value)  # 修改：保留真实的 value
             if adj_type[i, j] != {'controls-expression-of'}:
                 B_rows.append(i)
                 B_cols.append(j)
-                B_data.append(1)
+                B_data.append(value)  # 修改：保留真实的 value
 
-    # Create sparse matrices A and B from the collected data
     A = coo_matrix((A_data, (A_rows, A_cols)), shape=adj_G.shape)
     B = coo_matrix((B_data, (B_rows, B_cols)), shape=adj_G.shape)
     return A, B
@@ -394,6 +392,23 @@ def read_scatacseq_inputs(scATACseq_path):
     return dict_ATACseq
 
 
+def format_pathway_line(pathway):
+    col1, col2, col3, col4, col5 = pathway
+    return f"{col1}\t{col2}\t{col3}\t{col4}\t{col5}\n"
+
+
+def get_multiomics_supported_line(pathway, sender_protein, receiver_protein, receiver_tf):
+    ligands = [ligand for ligand in pathway[0].split(";") if ligand]
+    supported_ligands = [ligand for ligand in ligands if ligand in sender_protein]
+
+    if supported_ligands and pathway[1] in receiver_protein and pathway[3] in receiver_tf:
+        supported_pathway = list(pathway)
+        supported_pathway[0] = ";".join(supported_ligands)
+        return format_pathway_line(supported_pathway)
+
+    return None
+
+
 parser = argparse.ArgumentParser(description='Main entrance of SigFormer')
 parser.add_argument('--scRNAseq_path', type=str, default=None,
                     help='the path of scRNA-seq data')
@@ -426,7 +441,6 @@ parser.add_argument('--knn', type=int, default=10,
 parser.add_argument('--classification_accuracy', type=float, default=0.8, help='Threshold for cell classification')
 parser.add_argument('--edge_threshold', type=float, default=0.8, help='Threshold for edge reconstruction')
 parser.add_argument('--min_cell_count', type=int, default=5, help='Minimum cell count for each cell type')
-parser.add_argument('--max_length', type=int, default=10, help='max pathway length')
 parser.add_argument('--num_epochs', type=int, default=20, help='training epochs')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate for model optimization')
 parser.add_argument('--block_size', type=int, default=5000, help='size of each segment block')
@@ -643,7 +657,7 @@ for file in file_list:
                         mask = adj_mean.data >= args.edge_threshold
                         rows = adj_mean.row[mask]
                         cols = adj_mean.col[mask]
-                        data = np.ones_like(rows, dtype=adj_mean.data.dtype)
+                        data = adj_mean.data[mask]  # 核心修改：保留 GAE 训练出的真实边权重 w，不再强制设为 1
                         adj_matrix = coo_matrix((data, (rows, cols)), shape=adj_mean.shape)
 
                         if id in dict_all:
@@ -759,8 +773,7 @@ for file in file_list:
                                                    malignant_perturbed_gene,
                                                    lgrp_dict,
                                                    pathway_malignant,
-                                                   tftg_malignant,
-                                                   args.max_length)
+                                                   tftg_malignant)
                 if len(other_to_malignant) > 0:
                     print(f"Found {len(other_to_malignant)} pathways from {cell} to {args.index_cell}")
 
@@ -774,14 +787,12 @@ for file in file_list:
                         with open(output_file, 'w') as f:
                             f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
                             for pathway in other_to_malignant:
-                                col1 = pathway[0]  # Ligands
-                                col2 = pathway[1]  # Receptor
-                                col3 = pathway[2]  # Mediators
-                                col4 = pathway[3]  # TF
-                                col5 = pathway[4]  # TGs
-                                line = f"{col1}\t{col2}\t{col3}\t{col4}\t{col5}\n"
-                                if col1 in sender_protein and col2 in receiver_protein and col4 in receiver_tf:
-                                    result_multiomics.append(line)
+                                line = format_pathway_line(pathway)
+                                supported_line = get_multiomics_supported_line(
+                                    pathway, sender_protein, receiver_protein, receiver_tf
+                                )
+                                if supported_line is not None:
+                                    result_multiomics.append(supported_line)
                                 f.write(line)
 
                         if len(result_multiomics) > 0:
@@ -813,8 +824,7 @@ for file in file_list:
                                                        perturbed_gene,
                                                        lgrp_dict,
                                                        adj_pathway,
-                                                       adj_tftg,
-                                                       args.max_length)
+                                                       adj_tftg)
                     if len(malignant_to_other) > 0:
                         print(f"Found {len(malignant_to_other)} pathways from {args.index_cell} to {cell}")
 
@@ -828,14 +838,12 @@ for file in file_list:
                             with open(output_file, 'w') as f:
                                 f.write(f"Ligand\tReceptor\tMediator\tTF\tTarget\n")
                                 for pathway in malignant_to_other:
-                                    col1 = pathway[0]  # Ligands
-                                    col2 = pathway[1]  # Receptor
-                                    col3 = pathway[2]  # Mediators
-                                    col4 = pathway[3]  # TF
-                                    col5 = pathway[4]  # TGs
-                                    line = f"{col1}\t{col2}\t{col3}\t{col4}\t{col5}\n"
-                                    if col1 in sender_protein and col2 in receiver_protein and col4 in receiver_tf:
-                                        result_multiomics.append(line)
+                                    line = format_pathway_line(pathway)
+                                    supported_line = get_multiomics_supported_line(
+                                        pathway, sender_protein, receiver_protein, receiver_tf
+                                    )
+                                    if supported_line is not None:
+                                        result_multiomics.append(supported_line)
                                     f.write(line)
 
                             if len(result_multiomics) > 0:
