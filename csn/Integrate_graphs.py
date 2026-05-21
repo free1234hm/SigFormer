@@ -4,40 +4,39 @@ from scipy.sparse import coo_matrix
 
 
 def integrate_multiple_graphs(cell, adj_matrices, gene_lists, num_data):
-    # print(cell+'\t'+str(num_data))
-    # Step 1: Create a unified gene set and mapping
     unified_genes = sorted(set(gene for genelist in gene_lists for gene in genelist))
     gene_to_index = {gene: idx for idx, gene in enumerate(unified_genes)}
     n_genes = len(unified_genes)
 
-    # Step 2: Extract edges from all graphs
     edge_counts = {}
+    edge_weights = {}  # 新增：用于记录权重的累加和
+
     for adj, genelist in zip(adj_matrices, gene_lists):
-        rows, cols = adj.row, adj.col
-        for row, col in zip(rows, cols):
+        rows, cols, values = adj.row, adj.col, adj.data  # 新增：提取 values
+        for row, col, val in zip(rows, cols, values):
             source_gene = gene_to_index[genelist[row]]
             target_gene = gene_to_index[genelist[col]]
             edge = (source_gene, target_gene)
             if edge in edge_counts:
                 edge_counts[edge] += 1
+                edge_weights[edge] += val  # 累加权重
             else:
                 edge_counts[edge] = 1
-    rows = []
-    cols = []
-    data = []
-    
+                edge_weights[edge] = val  # 初始化权重
+
+    rows, cols, data = [], [], []
+
     for (r, c), v in edge_counts.items():
         if num_data == 1 and v > 0:
             rows.append(r)
             cols.append(c)
-            data.append(v)
+            data.append(edge_weights[(r, c)] / v)  # 修改：保存平均权重，而不是出现次数 v
         elif num_data > 1 and v >= min(10, max(2, num_data / 2)):
             rows.append(r)
             cols.append(c)
-            data.append(v)
+            data.append(edge_weights[(r, c)] / v)  # 修改：保存平均权重
 
     integrated_adj = coo_matrix((data, (rows, cols)), shape=(n_genes, n_genes))
-
     return integrated_adj, unified_genes
 
 
