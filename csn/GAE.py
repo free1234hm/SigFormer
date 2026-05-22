@@ -415,7 +415,7 @@ def compute_knockout_distances_from_cache(model, cache_item, knockout_gene_idx, 
     dist = torch.norm(cache_item["z"] - z_ko, p=2, dim=1)
     return dist
 
-def collect_random_knockout_background_fast(
+def _collect_random_knockout_background_fast_legacy(
     model,
     cell_cache,
     num_genes,
@@ -486,78 +486,114 @@ def collect_random_knockout_background_fast(
 
     return random_bg
 
-def collect_random_knockout_background(
+
+def collect_random_knockout_background_fast(
     model,
-    data_list,
-    cell_idx,
+    cell_cache,
+    num_genes,
     device,
     num_random_knockouts=500,
     agg='median',
     seed=42,
-    only_correct=True
+    candidate_genes=None
 ):
     """
-    只构建一次共享 random knockout 背景。
-    因为每次都是单基因随机敲除，所以后续所有 true knockout 都共用这个背景。
-    返回:
-        random_bg[label] = np.ndarray [B, num_genes]
+    Build one random knockout background per cell type.
+
+    num_random_knockouts is treated as the target number of valid background
+    vectors for each cell type, rather than only the number of sampling attempts.
     """
     rng = np.random.default_rng(seed)
-    num_genes = data_list[0].x.shape[0]
-    candidate_genes = np.arange(num_genes, dtype=int)
+
+    if len(cell_cache) == 0:
+        print("Warning: no valid cells available for random knockout background.")
+        return {}
+
+    def valid_gene_indices(values):
+        valid = set()
+        for gene_idx in values:
+            try:
+                gene_idx = int(gene_idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= gene_idx < num_genes:
+                valid.add(gene_idx)
+        return valid
+
+    global_candidates = None
+    if candidate_genes is not None:
+        global_candidates = valid_gene_indices(candidate_genes)
+        if len(global_candidates) == 0:
+            print("Warning: candidate_genes contains no valid gene indices.")
+            return {}
+
+    cache_by_label = {}
+    for item in cell_cache:
+        cache_by_label.setdefault(item["label"], []).append(item)
 
     random_bg = {}
 
-    for b in range(num_random_knockouts):
-        rand_ko = int(rng.choice(candidate_genes, size=1, replace=False)[0])
+    for label, label_items in cache_by_label.items():
+        active_union = set()
+        for item in label_items:
+            active_union.update(valid_gene_indices(item["active_genes"]))
 
-        dist_dict_b = {}
-        with torch.no_grad():
-            for idx in cell_idx:
-                data = data_list[idx]
-                edge_index_0, _ = filter_edges_by_weight(data.edge_index, data.edge_attr, 0)
-                edge_index_1, _ = filter_edges_by_weight(data.edge_index, data.edge_attr, 1)
+        if global_candidates is None:
+            label_candidates = np.array(sorted(active_union), dtype=int)
+        else:
+            label_candidates = np.array(sorted(active_union & global_candidates), dtype=int)
 
-                if edge_index_1.shape[1] <= 1:
-                    # print(f"边不足")
-                    continue
+        if label_candidates.size == 0:
+            print(f"Warning: label {label} has no candidate genes for random knockout background.")
+            continue
 
-                label = int(data.y.cpu().item())
+        label_bg = []
+        attempts = 0
+        max_attempts = num_random_knockouts * 10
 
-                if only_correct:
-                    x = data.x.to(device)
-                    _, _, _, y = model(x, edge_index_0.to(device), edge_index_1.to(device))
-                    pred = int(y.argmax(dim=1).cpu().item())
-                    if pred != label:
-                        # print(f"细胞类型预测错误")
-                        continue
+        while len(label_bg) < num_random_knockouts and attempts < max_attempts:
+            attempts += 1
+            rand_ko = int(rng.choice(label_candidates))
 
-                dist = compute_knockout_distances_for_cell(model, data, rand_ko, device)
-                if dist is None:
-                    continue
+            dist_list = []
+            for item in label_items:
+                dist = compute_knockout_distances_from_cache(
+                    model=model,
+                    cache_item=item,
+                    knockout_gene_idx=rand_ko,
+                    device=device
+                )
+                if dist is not None:
+                    dist_list.append(dist)
 
-                if label not in dist_dict_b:
-                    dist_dict_b[label] = []
-                dist_dict_b[label].append(dist)
+            if len(dist_list) == 0:
+                continue
 
-        agg_b = aggregate_distances_by_label(dist_dict_b, agg=agg)
+            agg_b = aggregate_distances_by_label({label: dist_list}, agg=agg)
+            if label in agg_b:
+                label_bg.append(agg_b[label])
 
-        for label, score_vec in agg_b.items():
-            if label not in random_bg:
-                random_bg[label] = []
-            random_bg[label].append(score_vec)
+            print("\r", end="")
+            print(
+                f"Random knockout background label {label}: "
+                f"{len(label_bg)}/{num_random_knockouts}",
+                end=""
+            )
 
-        print("\r", end="")
-        print(f"Random knockout background: {b + 1}/{num_random_knockouts}", end="")
-    print()
+        print()
 
-    for label in random_bg:
-        random_bg[label] = np.stack(random_bg[label], axis=0)  # [B, num_genes]
-    '''
-    for label in random_bg:
-        random_df = pd.DataFrame(random_bg[label])
-        random_df.to_csv(os.path.join(output_dir, f"{label}_random.csv"), index=False)
-    '''
+        if len(label_bg) == 0:
+            print(f"Warning: label {label} collected no valid random knockout backgrounds.")
+            continue
+
+        if len(label_bg) < num_random_knockouts:
+            print(
+                f"Warning: label {label} collected only "
+                f"{len(label_bg)}/{num_random_knockouts} random knockout backgrounds "
+                f"after {attempts} attempts."
+            )
+
+        random_bg[label] = np.stack(label_bg, axis=0)
 
     return random_bg
 
