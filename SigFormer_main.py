@@ -1115,7 +1115,7 @@ parser.add_argument('--secreted_ligand_file', type=str, default='./reference_lib
                     help='secreted ligand-receptor pairs used when spatial=true')
 parser.add_argument('--index_cell', type=str, default='Malignant',
                     help='the index cell type')
-parser.add_argument('--', type=str, default=None,
+parser.add_argument('--retained_cell_types', type=str, default=None,
                     help='optional cell-type file (one exact label per line or first TSV/CSV column); filters cells; empty retains all annotated types')
 parser.add_argument('--min_cell', type=float, default=0.01,
                     help='parameter for gene filtering')
