@@ -226,13 +226,13 @@ Runtime increased with dataset size for small and moderately sized datasets. Fro
 
 ![End-to-end runtime of SigFormer](https://github.com/free1234hm/SigFormer/blob/main/Runtime.png)
 
-**End-to-end runtime of SigFormer across datasets of different sizes.** Runtime of the complete SigFormer workflow across 19 datasets containing 107–277,878 cells using 2,000 or 5,000 highly variable genes, evaluated on (a) a local PC and (b) a server.
+Runtime of the complete SigFormer workflow across 19 datasets containing 107–277,878 cells using 2,000 or 5,000 highly variable genes, evaluated on (a) a local PC and (b) a server.
 
 ### Parameter guidance
 
-- Use `--hvg_top_gene 2000` for a faster exploratory run, or the default `--hvg_top_gene 5000` for a broader background gene set. Reducing the gene set can exclude signaling intermediates and change pathway coverage, so assess the trade-off for the biological question before final analysis.
+- Use `--hvg_top_gene 2000` for a faster exploratory run, or the default `--hvg_top_gene 5000` for a broader background gene set. Reducing the gene set can exclude signaling intermediates and change pathway coverage.
 - `--cell_top_gene` (default: 500) controls the top-expressed genes selected per cell within the background. Reducing this value may reduce network-construction cost but also changes the inferred cell-specific networks.
-- `--block_size` (default: 5,000) bounds the target metacell count for each large sample. Lower values can reduce downstream computation and memory requirements but produce coarser representations and may leave rare cell types below `--min_cell_count`.
+- `--block_size` (default: 5,000) bounds the target metacell count for each large sample. Lower values can reduce downstream computation and memory requirements.
 - When `--background_gene_set` is supplied, its retained genes replace HVG selection; changing `--hvg_top_gene` will not reduce that custom background.
 
 We will continue to optimize computational efficiency while preserving predictive performance.
