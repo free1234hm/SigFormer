@@ -21,7 +21,7 @@ git clone https://github.com/free1234hm/SigFormer.git
 cd SigFormer
 ```
 
-If `reference_library/` is not already present, extract `reference_library.zip` from the project root to access the curated reference signaling library:
+Extract `reference_library.zip` from the project root before running SigFormer:
 
 ```bash
 unzip reference_library.zip
@@ -60,6 +60,8 @@ pip install -r requirements.txt
 On our local workstation (Intel Core i7-7800X CPU, 64 GB RAM, NVIDIA GeForce RTX 4090 24 GB), setting up the environment typically requires about 26 minutes, depending on internet speed and package source availability.
 
 ## 2. Prepare datasets
+
+The GitHub test datasets are stored directly in `test_data/scRNA-seq/` (`.h5ad`), `test_data/scProteomics/` (`.txt`), and `test_data/scATAC-seq/` (`.tsv`).
 
 ### scRNA-seq data (required):
 
@@ -103,8 +105,8 @@ Below are the parameters used to run the provided test datasets (human cancers),
 
 - **scProteomics_path** (`str`, default: `None`). Path to a tab-delimited scProteomics file with an optional third-column score.
 - **scATACseq_path** (`str`, default: `None`). Path to a tab-delimited scATAC-seq file with an optional third-column score.
-- **retained_cell_types** (`str`, default: `None`). Optional TXT, TSV, or CSV file specifying the cell types to analyze. Omit it or pass an empty string to retain all annotated cell types, subject to existing quality and cell-count filters. Selection is applied before per-sample preprocessing and HVG selection.
-- **background_gene_set** (`str`, default: `None`). Optional TXT, TSV, or CSV file whose first column contains a custom background gene set, such as differentially expressed genes. When provided, this set replaces HVG selection.
+- **retained_cell_types** (`str`, default: `None`). Optional TXT, TSV, or CSV file with one cell-type name per line or in the first column, matching `obs['celltype']` exactly (including spaces). The list must include `index_cell` and at least one other type. Omit it or pass an empty string to retain all annotated types, subject to quality and cell-count filters. Selection precedes per-sample preprocessing and HVG selection, so it can affect the selected HVGs.
+- **background_gene_set** (`str`, default: `None`). Optional TXT, TSV, or CSV file whose first column contains custom background genes, such as genes of interest or user-derived differentially expressed genes. This set replaces HVG selection and is not capped by `hvg_top_gene`; genes must match `adata.var_names` and survive gene filtering. When omitted, the background is selected using `hvg_top_gene`.
 
 ### Data preprocessing
 
@@ -116,36 +118,6 @@ Below are the parameters used to run the provided test datasets (human cancers),
 - **log_trans** (`bool`, default: `True`). Log-transform expression.
 - **hvg_top_gene** (`int`, default: `5000`). Number of highly variable genes (HVGs) used as background genes when `background_gene_set` is not provided.
 - **cell_top_gene** (`int`, default: `500`). Number of top-expressed genes to keep per cell within the selected background gene set.
-
-### Selecting cell types and background genes
-
-The complete set of cell types is not required. To focus network construction and downstream pathway inference on selected populations, provide `--retained_cell_types ./retained_cell_types.txt`. The file can contain one cell-type name per line, for example:
-
-```text
-Malignant
-Fibroblast
-T cell
-```
-
-Names are case-sensitive and must match `adata.obs['celltype']` exactly; spaces within names are preserved. For TSV or CSV input, only the first column is used. An optional `celltype` or `cell_type` header, blank lines, and lines starting with `#` are ignored; duplicate labels are removed. An empty file is an error, whereas an omitted argument or `--retained_cell_types ""` disables selection. Missing labels are reported and are not replaced with other types.
-
-The selected list must include `--index_cell` (default: `Malignant`) and at least one other cell type. Set `--index_cell` explicitly for non-tumor analyses. Networks are constructed for eligible retained types; pathway inference retains the existing index-to-other and other-to-index design. Each sample must retain the index type and at least one other type after filtering. Types below `--min_cell_count` are excluded, including after metacell compression.
-
-Cell-type selection precedes per-sample cell/gene filtering, normalization, background-gene selection, spatial-neighbor calculation (when enabled), and metacell compression. Consequently, changing the retained populations can change the HVGs and, in spatial mode, the neighborhoods. With no custom background file, `--hvg_top_gene` (default: 5,000) defines a shared background across retained cell types within each sample; HVGs are selected separately for each sample, not across all samples combined.
-
-For heterogeneous microenvironments, HVG-based selection is a reasonable starting point. When analyzing only a few cell types, increasing `--hvg_top_gene` can include additional genes, while increasing `--cell_top_gene` (default: 500) retains more expressed genes per cell **from that background**. Increasing `cell_top_gene` alone cannot recover genes excluded from the background, and larger gene sets increase computational cost. Neither setting guarantees retention of a particular gene.
-
-Use `--background_gene_set` when specific genes must be considered, or supply a user-derived differentially expressed gene list for a case-control question. This file **replaces**, rather than supplements, automatic HVG selection, and `--hvg_top_gene` does not cap the custom set. Only genes matching `adata.var_names` and surviving gene filtering are retained; supplying a list does not bypass expression filters or guarantee that a gene appears in an inferred pathway. Include relevant signaling intermediates as appropriate, since a DEG-only background may omit genes needed to connect receptors to TFs. SigFormer does not compute differential expression from this option; analyze different biological conditions separately rather than combining them as replicate samples for consensus inference.
-
-Background files use the first column of TXT, TSV, or CSV input, with optional gene headers such as `gene` or `gene_symbol`. If the retained background has fewer genes than `--cell_top_gene`, SigFormer warns and uses all expressed background genes per cell without raising an error.
-
-For example, after creating the cell-type and background files:
-
-```bash
-python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/hvg5000/pre/Data_Chung2017_Breast_all.h5ad --retained_cell_types ./retained_cell_types.txt --background_gene_set ./background_genes.tsv
-```
-
-Omit `--background_gene_set` in this command to select HVGs from the retained populations instead.
 
 ### Spatial mode
 
@@ -169,22 +141,30 @@ Omit `--background_gene_set` in this command to select HVGs from the retained po
 - **metacell_expr_threshold** (`float`, default: `0.05`). After metacell aggregation, mean expression values below this threshold are reset to zero; use `0` to disable thresholding.
 - **random_seed** (`int`, default: `43`). Random seed for reproducibility.
 
-**scRNA-seq inference example:** :
+**scRNA-seq inference example:**
 
 ```bash
-python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/hvg5000/pre/Data_Chung2017_Breast_all.h5ad --pathway_file ./reference_library/Intracellular_signaling.txt --ligand_file "./reference_library/Ligand_secreted&membrane.txt"
+python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad --pathway_file ./reference_library/Intracellular_signaling.txt --ligand_file "./reference_library/Ligand_secreted&membrane.txt"
 ```
 
-For a case–control analysis, a custom background gene set can be supplied as follows:
+**Multi-omics integration example:**
 
 ```bash
-python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/hvg5000/pre/Data_Chung2017_Breast_all.h5ad --background_gene_set ./DEG_list.tsv
+python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad --scProteomics_path ./test_data/scProteomics/Breast_cancer.txt --scATACseq_path ./test_data/scATAC-seq/Breast_cancer.tsv
 ```
 
-**Multi-omics integration example:** :
+**Example after creating the cell-type and background files:**
 
 ```bash
-python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/hvg5000/pre/Data_Chung2017_Breast_all.h5ad --scProteomics_path ./test_data/scProteomics/SPDB_tissue/Breast_cancer.txt --scATACseq_path ./test_data/scATAC-seq/ATACdb_cellline/Breast_cancer.txt
+python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad --retained_cell_types ./retained_cell_types.txt --background_gene_set ./background_genes.tsv
+```
+
+**Case-control analysis example:**
+
+Supply a user-derived DEG list as the background. Analyze each condition separately; this option does not perform differential expression analysis.
+
+```bash
+python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad --background_gene_set ./DEG_list.tsv
 ```
 
 Repository directory and file names use underscores in place of whitespace. Gene symbols and cell-type labels inside data files are preserved. Quote user-supplied paths when they contain shell-special characters; the combined ligand-library filename contains `&`.
