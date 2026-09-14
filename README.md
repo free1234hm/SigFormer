@@ -63,7 +63,7 @@ On our local workstation (Intel Core i7-7800X CPU, 64 GB RAM, NVIDIA GeForce RTX
 
 The GitHub test datasets are stored directly in `test_data/scRNA-seq/` (`.h5ad`), `test_data/scProteomics/` (`.txt`), and `test_data/scATAC-seq/` (`.tsv`).
 
-### scRNA-seq data (required):
+### Single-cell RNA-seq data (required):
 
 Provide scRNA-seq data as an .h5ad (AnnData) file.
 
@@ -144,7 +144,7 @@ Below are the parameters used to run the provided test datasets (human cancers),
 **scRNA-seq inference example:**
 
 ```bash
-python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad --pathway_file ./reference_library/Intracellular_signaling.txt --ligand_file "./reference_library/Ligand_secreted&membrane.txt"
+python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad
 ```
 
 **Multi-omics integration example:**
