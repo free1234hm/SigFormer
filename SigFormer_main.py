@@ -1107,7 +1107,7 @@ parser.add_argument('--scATACseq_path', type=str, default=None,
                     help='tab-delimited scATAC-seq file: celltype, TF, optional Score')
 parser.add_argument('--pathway_file', type=str, default='./reference_library/Intracellular_signaling.txt',
                     help='the path of curated intracellular signaling interactions')
-parser.add_argument('--ligand_file', type=str, default='./reference_library/Ligand_secreted&membrane.txt',
+parser.add_argument('--ligand_file', type=str, default='./reference_library/Ligand_secreted_and_membrane.txt',
                     help='curated ligand-receptor pairs used when spatial=false')
 parser.add_argument('--membrane_ligand_file', type=str, default='./reference_library/Ligand_membrane.txt',
                     help='membrane-bound ligand-receptor pairs used when spatial=true')
