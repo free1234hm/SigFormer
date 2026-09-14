@@ -99,7 +99,7 @@ Below are the parameters used to run the provided test datasets (human cancers),
 
 - **scRNAseq_path** (`str`, default: `None`). Path to scRNA-seq data (an `.h5ad` file, or a folder containing `.h5ad` files).
 - **pathway_file** (`str`, default: `./reference_library/Intracellular_signaling.txt`). Curated intracellular signaling interactions.
-- **ligand_file** (`str`, default: `./reference_library/Ligand_secreted&membrane.txt`). Curated ligand–receptor pairs.
+- **ligand_file** (`str`, default: `./reference_library/Ligand_secreted_and_membrane.txt`). Curated ligand–receptor pairs.
 
 ### Optional input files
 
@@ -166,8 +166,6 @@ Supply a user-derived DEG list as the background. Analyze each condition separat
 ```bash
 python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad --background_gene_set ./DEG_list.tsv
 ```
-
-Repository directory and file names use underscores in place of whitespace. Gene symbols and cell-type labels inside data files are preserved. Quote user-supplied paths when they contain shell-special characters; the combined ligand-library filename contains `&`.
 
 ## 4. Check Results
 
