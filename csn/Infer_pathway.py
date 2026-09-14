@@ -1,12 +1,17 @@
-# 文件路径：SigFormer_v3/csn/Infer_pathway.py
+# File path: SigFormer_v3/csn/Infer_pathway.py
 from scipy.sparse import coo_matrix
 import networkx as nx
 import numpy as np
 
 
+PATH_NODE_SEPARATOR = "->"
+PARALLEL_PATH_SEPARATOR = ";"
+
+
 def subgraph_fast(A3_sparse, perturbed_gene):
     """
-    保持 coo_matrix，形状不变，只保留 row/col 都在 perturbed_gene 中的边
+    Keep a coo_matrix with the original shape and retain only edges whose
+    row and column are both in perturbed_gene.
     """
     keep = np.zeros(A3_sparse.shape[0], dtype=bool)
     keep[list(perturbed_gene)] = True
@@ -32,9 +37,9 @@ def coo_to_digraph(sub_sparse):
 
 def build_all_shortest_paths_from_pred(pred, source, target, max_paths=100):
     """
-    根据 nx.dijkstra_predecessor_and_distance 返回的前驱字典，
-    回溯 source->target 的所有代价最低的并行 paths。
-    新增了 max_paths 防止路径爆炸。
+    Backtrack all minimum-cost parallel paths from source to target using
+    the predecessor dictionary returned by nx.dijkstra_predecessor_and_distance.
+    max_paths prevents path explosion.
     """
     if target not in pred:
         return None
@@ -74,7 +79,7 @@ def merge_shortest_paths(unified_gene_list, shortest_path, tftg_malignant):
         source = p[0]
         tf = p[-1]
         middle = [unified_gene_list[i] for i in p[1:-1]]
-        mid_str = "_".join(middle) if middle else ""
+        mid_str = PATH_NODE_SEPARATOR.join(middle) if middle else ""
         tgs = tftg_malignant.col[tftg_malignant.row == tf].tolist()
         tg_names = ";".join([unified_gene_list[i] for i in tgs]) if tgs else "No_Target"
         merged_path = [unified_gene_list[source], mid_str, unified_gene_list[tf], tg_names]
@@ -84,7 +89,7 @@ def merge_shortest_paths(unified_gene_list, shortest_path, tftg_malignant):
     tfs = [p[-1] for p in shortest_path]
 
     if len(set(sources)) > 1 or len(set(tfs)) > 1:
-        raise ValueError("shortest_path 中包含不同的 source 或 TF，无法 merge")
+        raise ValueError("shortest_path contains different sources or TFs and cannot be merged")
 
     source = sources[0]
     tf = tfs[0]
@@ -95,32 +100,31 @@ def merge_shortest_paths(unified_gene_list, shortest_path, tftg_malignant):
     for p in shortest_path:
         sub_p = [unified_gene_list[i] for i in p]
         middle = sub_p[1:-1]
-        mid_str = "_".join(middle) if middle else ""
+        mid_str = PATH_NODE_SEPARATOR.join(middle) if middle else ""
         mid_strings.append(mid_str)
 
-    merged_middle_str = ";".join(mid_strings)
+    merged_middle_str = PARALLEL_PATH_SEPARATOR.join(mid_strings)
     merged_path = [unified_gene_list[source], merged_middle_str, unified_gene_list[tf], tg_names]
     return merged_path
 
 
-def infer_pathway(unified_gene_list, gene_set, perturbed_gene, lg_rp_dict, A3_sparse, A4_sparse):
-    lg_rp_pairs = [(k, v) for k, s in lg_rp_dict.items() for v in s]
-    pathways_lg_rp = [
-        [ligand, receptor]
-        for ligand in gene_set
-        for _, receptor in lg_rp_pairs if ligand == _
-    ]
-
-    source_set = set(p[-1] for p in pathways_lg_rp)  # receptors
+def infer_pathway(
+    unified_gene_list,
+    gene_set,
+    perturbed_gene,
+    lg_rp_dict,
+    A3_sparse,
+    A4_sparse
+):
     target_set = set(A4_sparse.row)  # TFs
 
     dict_rplg = {}
-    for ligand, receptor in pathways_lg_rp:
-        dict_rplg.setdefault(receptor, []).append(ligand)
+    for ligand in sorted(set(gene_set)):
+        for receptor in sorted(lg_rp_dict.get(ligand, ())):
+            dict_rplg.setdefault(receptor, []).append(ligand)
 
     pathways_with_perturbed_TFs = []
-
-    for source in source_set:
+    for source in sorted(dict_rplg):
         ligands_for_source = dict_rplg.get(source, [])
         ligands_for_source = [unified_gene_list[i] for i in ligands_for_source]
         merged_ligs = ";".join(ligands_for_source)
@@ -139,7 +143,7 @@ def infer_pathway(unified_gene_list, gene_set, perturbed_gene, lg_rp_dict, A3_sp
         if source not in G:
             continue
 
-        # 核心更新：使用加权的前驱算法，提取所有并行的最优前驱字典
+        # Use the weighted predecessor algorithm to collect all optimal predecessors.
         try:
             pred, dist = nx.dijkstra_predecessor_and_distance(G, source, weight='cost')
         except nx.NetworkXNoPath:
@@ -149,19 +153,27 @@ def infer_pathway(unified_gene_list, gene_set, perturbed_gene, lg_rp_dict, A3_sp
         if source in candidate_targets:
             candidate_targets.remove(source)
 
-        for target in candidate_targets:
+        for target in sorted(candidate_targets):
             if target not in pred:
                 continue
 
-            # 使用你最初的优秀逻辑：回溯出所有的最优路径
+            # Backtrack all optimal paths.
             shortest_paths = build_all_shortest_paths_from_pred(pred, source, target, max_paths=100)
 
             if not shortest_paths:
                 continue
+            shortest_paths.sort(key=tuple)
 
             merged = merge_shortest_paths(unified_gene_list, shortest_paths, A4_sparse)
             if merged:
+                target_scores = perturbed_gene[source]
+                if isinstance(target_scores, dict):
+                    perturbation_score = float(target_scores[target])
+                else:
+                    # Backward compatibility for legacy significant-gene lists.
+                    perturbation_score = 1.0
                 merged.insert(0, merged_ligs)
+                merged.append(perturbation_score)
                 pathways_with_perturbed_TFs.append(merged)
 
-    return pathways_with_perturbed_TFs
+    return sorted(pathways_with_perturbed_TFs, key=lambda pathway: pathway[-1], reverse=True)

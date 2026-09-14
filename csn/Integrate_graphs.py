@@ -1,5 +1,5 @@
 import numpy as np
-from collections import Counter
+from collections import defaultdict
 from scipy.sparse import coo_matrix
 
 
@@ -9,20 +9,20 @@ def integrate_multiple_graphs(cell, adj_matrices, gene_lists, num_data):
     n_genes = len(unified_genes)
 
     edge_counts = {}
-    edge_weights = {}  # 新增：用于记录权重的累加和
+    edge_weights = {}  # Sum edge weights across supporting samples.
 
     for adj, genelist in zip(adj_matrices, gene_lists):
-        rows, cols, values = adj.row, adj.col, adj.data  # 新增：提取 values
+        rows, cols, values = adj.row, adj.col, adj.data
         for row, col, val in zip(rows, cols, values):
             source_gene = gene_to_index[genelist[row]]
             target_gene = gene_to_index[genelist[col]]
             edge = (source_gene, target_gene)
             if edge in edge_counts:
                 edge_counts[edge] += 1
-                edge_weights[edge] += val  # 累加权重
+                edge_weights[edge] += val
             else:
                 edge_counts[edge] = 1
-                edge_weights[edge] = val  # 初始化权重
+                edge_weights[edge] = val
 
     rows, cols, data = [], [], []
 
@@ -30,11 +30,11 @@ def integrate_multiple_graphs(cell, adj_matrices, gene_lists, num_data):
         if num_data == 1 and v > 0:
             rows.append(r)
             cols.append(c)
-            data.append(edge_weights[(r, c)] / v)  # 修改：保存平均权重，而不是出现次数 v
+            data.append(edge_weights[(r, c)] / v)  # Store the mean edge weight, not the support count.
         elif num_data > 1 and v >= min(10, max(2, num_data / 2)):
             rows.append(r)
             cols.append(c)
-            data.append(edge_weights[(r, c)] / v)  # 修改：保存平均权重
+            data.append(edge_weights[(r, c)] / v)  # Store the mean edge weight.
 
     integrated_adj = coo_matrix((data, (rows, cols)), shape=(n_genes, n_genes))
     return integrated_adj, unified_genes
@@ -43,14 +43,26 @@ def integrate_multiple_graphs(cell, adj_matrices, gene_lists, num_data):
 def integrate_multiple_dicts(all_perturbation_results):
     for cell_type in all_perturbation_results:
         for ko_gene in all_perturbation_results[cell_type]:
-            gene_lists = all_perturbation_results[cell_type][ko_gene]
-            if len(gene_lists) == 1:
-                all_perturbation_results[cell_type][ko_gene] = gene_lists[0]
-            else:
-                flat_genes = [g for lst in gene_lists for g in (lst if isinstance(lst, (list, tuple)) else [lst])]
-                counts = Counter(flat_genes)
-                merged_genes = [g for g, c in counts.items() if c >= min(10, max(2, len(gene_lists)/2))]
-                all_perturbation_results[cell_type][ko_gene] = merged_genes
+            sample_results = all_perturbation_results[cell_type][ko_gene]
+            min_support = 1 if len(sample_results) == 1 else min(
+                10, max(2, len(sample_results) / 2)
+            )
+
+            gene_scores = defaultdict(list)
+            for sample_result in sample_results:
+                if isinstance(sample_result, dict):
+                    items = sample_result.items()
+                else:
+                    # Backward compatibility with results generated before scores were retained.
+                    items = ((gene, 1.0) for gene in sample_result)
+                for gene, score in items:
+                    gene_scores[gene].append(float(score))
+
+            all_perturbation_results[cell_type][ko_gene] = {
+                gene: float(np.mean(scores))
+                for gene, scores in gene_scores.items()
+                if len(scores) >= min_support
+            }
 
     return all_perturbation_results
 
