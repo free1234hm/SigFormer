@@ -179,15 +179,15 @@ python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Br
 
 ## 4. Check Results
 
-SigFormer creates a `./result` folder in your current working directory containing inferred pathway files, including:
+SigFormer creates a `./results` folder in your current working directory containing inferred pathway files, including:
 
 - `index_cell_to_cell_pathway.txt`: signaling pathways from the index cell type to a non-index cell type.
 - `cell_to_index_cell_pathway.txt`: signaling pathways from a non-index cell type to the index cell type.
 - ...
 
-Reconstructed cell-type networks are written to `result/<dataset>/cell_network/`. Existing results from earlier versions are not renamed automatically.
+Reconstructed cell-type networks are written to `results/<dataset>/cell_network/`. Existing results from earlier versions are not renamed automatically.
 
-scRNA-seq pathway files are written to `result/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `result/<dataset>/multiomics-supported/`; a cell-pair output is written only when at least one inferred ligand, receptor, or TF matches positive normalized multi-omics evidence. Multi-omics evidence reranks pathways rather than pruning them.
+scRNA-seq pathway files are written to `results/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `results/<dataset>/multiomics-supported/`; a cell-pair output is written only when at least one inferred ligand, receptor, or TF matches positive normalized multi-omics evidence. Multi-omics evidence reranks pathways rather than pruning them.
 
 Each pathway file is a tab-delimited text file, with one pathway per line and six columns: `Ligand, Receptor, Mediator, TF, Target, Evidence_score`. Rows are sorted by `Evidence_score` in descending order.
 
