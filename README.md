@@ -129,12 +129,8 @@ Below are the parameters used to run the provided test datasets (human cancers),
 
 For a sender A to receiver B pathway, spatial mode uses the following ligand-selection rules:
 
-- **Membrane-bound ligands:** use A cells in the union of B cells' filtered KNN neighborhoods. Each sender cell is counted once per sample, even if it neighbors multiple B cells.
-- **Secreted ligands:** use all retained A cells in the sample, including proximal and distal cells. Secreted ligands are not restricted to the distal region, and their sender population does not depend on `knn`.
-
-Spatial neighborhoods and ligand-expression counts are computed from preprocessed cells before metacell compression. Counts are pooled across accepted samples before applying the expression-fraction threshold. Candidates must belong to the selected background genes and the corresponding ligand–receptor library; spatial mode does not additionally require a ligand to belong to the sender's reconstructed network. Network construction and training use all retained populations, not only neighboring cells. If compression is triggered, spatial mode clusters cells within each type using their spatial embedding; nonspatial mode uses expression-based dimensionality reduction and clustering.
-
-With `spatial=False`, ligand selection instead uses the sender's reconstructed-network genes and the combined ligand–receptor library, without the spatial expression-fraction filter.
+- **Membrane-bound ligands:** use A cells in the union of B cells' filtered KNN neighborhoods.
+- **Secreted ligands:** use all retained A cells in the sample, including proximal and distal cells.
 
 ### Model training and network reconstruction
 
