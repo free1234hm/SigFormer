@@ -190,10 +190,11 @@ Reconstructed cell-type networks are written to `result/<dataset>/cell_network/`
 scRNA-seq pathway files are written to `result/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `result/<dataset>/multiomics-supported/`; a cell-pair output is written only when at least one inferred ligand, receptor, or TF matches positive normalized multi-omics evidence. Multi-omics evidence reranks pathways rather than pruning them.
 
 Each pathway file is a tab-delimited text file, with one pathway per line and six columns: `Ligand, Receptor, Mediator, TF, Target, Evidence_score`. Rows are sorted by `Evidence_score` in descending order.
+
 In scRNA-seq-only results, `Evidence_score` equals the normalized receptor-to-TF knockout score. In multi-omics results, `Evidence_score` is the available-modality weighted mean of the knockout score, sender ligand protein abundance, receiver receptor protein abundance, and receiver TF chromatin-binding potential.
 
-`Mediator` encodes the intermediate genes of one or more minimum-cost directed paths linking receptors to TFs. Weighted Dijkstra uses an edge cost of `0.5 - log(p)`, where `p` is the reconstructed edge weight clipped to `[1e-12, 1]`:
-- Parallel paths with the same minimum total cost are separated by semicolons `;` (up to 100 paths per receptor–TF pair). They need not have the same number of edges.
+`Mediator` encodes the intermediate genes of one or more minimum-cost directed paths linking receptors to TFs:
+- Parallel paths with the same minimum total cost are separated by semicolons `;`.
 - Consecutive mediator genes within one path are separated by ASCII arrows `->`.
 - Underscores remain part of gene names and are not treated as delimiters.
 
