@@ -1654,7 +1654,7 @@ for file in file_list:
                 for mode_name in ("membrane", "secreted")
             }
 
-        recon_dir0 = f'./result/{file.stem}/cell_network'
+        recon_dir0 = f'./results/{file.stem}/cell_network'
         save_cell_specific_networks(final_matrix, unified_gene_list, recon_dir0)
 
         all_perturbation_results = integrate_multiple_dicts(all_perturbation_results)
@@ -1726,8 +1726,8 @@ for file in file_list:
             tftg_final[cell] = adj_tftg
             pathway_final[cell] = adj_pathway
 
-        inferred_root = f'./result/{file.stem}/scRNAseq-inferred'
-        multiomics_root = f'./result/{file.stem}/multiomics-supported'
+        inferred_root = f'./results/{file.stem}/scRNAseq-inferred'
+        multiomics_root = f'./results/{file.stem}/multiomics-supported'
         has_multiomics = (
             bool(set(dict_gene) & set(dict_Proteomics))
             or bool(set(dict_gene) & set(dict_ATACseq))
