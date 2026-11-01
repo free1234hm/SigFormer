@@ -347,11 +347,14 @@ def _mode_or_first(values):
     return values.iloc[0] if len(values) > 0 else None
 
 
-def _cluster_mean(X, indices, expression_threshold=0.0):
+def _cluster_mean(X, indices, expression_threshold=0.0, min_expression_fraction=0.1):
     X_sub = X[indices]
     mean_values = np.asarray(X_sub.mean(axis=0)).ravel()
     if expression_threshold > 0:
         mean_values[mean_values < expression_threshold] = 0.0
+    if min_expression_fraction > 0:
+        expressed_count = np.asarray((X_sub > 0).sum(axis=0)).ravel()
+        mean_values[expressed_count < min_expression_fraction * len(indices)] = 0.0
     return mean_values
 
 
@@ -418,8 +421,9 @@ def _allocate_metacells_by_target(celltype_groups, target_metacells):
 def compress_anndata(
         adata,
         block_size,
-        expression_threshold=0.0,
-        clustering_obsm_key=None
+        expression_threshold=0.1,
+        clustering_obsm_key=None,
+        min_expression_fraction=0.1
     ):
     n_cells = adata.n_obs
 
@@ -430,6 +434,8 @@ def compress_anndata(
 
     if expression_threshold < 0:
         raise ValueError("expression_threshold must be non-negative.")
+    if not 0 <= min_expression_fraction <= 1:
+        raise ValueError("min_expression_fraction must be between 0 and 1.")
 
     celltype_groups = [
         (celltype, np.asarray(indices, dtype=int))
@@ -444,6 +450,7 @@ def compress_anndata(
     )
     if expression_threshold > 0:
         print(f"Set metacell mean expression values < {expression_threshold} to 0.")
+    print(f"Require expression > 0 in at least {min_expression_fraction:.1%} of metacell members.")
 
     X = adata.X
     if clustering_obsm_key is None:
@@ -510,7 +517,8 @@ def compress_anndata(
             X_rows.append(_cluster_mean(
                 X,
                 member_indices,
-                expression_threshold=expression_threshold
+                expression_threshold=expression_threshold,
+                min_expression_fraction=min_expression_fraction
             ).astype(np.float32))
 
             member_obs = adata.obs.iloc[member_indices]
@@ -703,6 +711,25 @@ def get_spatial_sender_type_sets(
         distant_indices_by_celltype[receiver_celltype] = distant_indices
 
     return neighbor_sender_types, distant_sender_types, distant_indices_by_celltype
+
+
+def get_proximal_and_all_sender_sets(adata, neighbor_indices_by_celltype, celltype_key="celltype"):
+    """Use proximal senders for membrane ligands and all senders for secretion.
+
+    Sender populations remain cell-type specific; same-type/autocrine pairs
+    are excluded as in the main workflow. Indices refer to uncompressed cells.
+    """
+    labels = np.asarray(adata.obs[celltype_key])
+    neighbor_sender_types = {}
+    all_sender_types = {}
+    all_indices_by_celltype = {}
+    for receiver, neighbor_indices in neighbor_indices_by_celltype.items():
+        neighbor_indices = np.asarray(neighbor_indices, dtype=int)
+        all_indices = np.flatnonzero(labels != receiver)
+        neighbor_sender_types[receiver] = set(labels[neighbor_indices])
+        all_sender_types[receiver] = set(labels[all_indices])
+        all_indices_by_celltype[receiver] = all_indices
+    return neighbor_sender_types, all_sender_types, all_indices_by_celltype
 
 
 def collect_spatial_ligand_expression_counts(
@@ -1151,10 +1178,15 @@ parser.add_argument('--min_cell_count', type=int, default=5, help='Minimum cell 
 parser.add_argument('--num_epochs', type=int, default=50, help='training epochs')
 parser.add_argument('--learning_rate', type=float, default=0.0001, help='learning rate for model optimization')
 parser.add_argument('--block_size', type=int, default=5000, help='size of each segment block')
-parser.add_argument('--metacell_expr_threshold', type=float, default=0.05,
+parser.add_argument('--metacell_expr_threshold', type=float, default=0.1,
                     help='set metacell mean expression values below this threshold to 0; use 0 to disable')
+parser.add_argument('--metacell_min_expression_fraction', type=float, default=0.1,
+                    help='minimum fraction of metacell members with expression > 0; inclusive, use 0 to disable')
 parser.add_argument('--random_seed', type=int, default=43, help='random seed')
 args = parser.parse_args()
+
+if args.scRNAseq_path is None:
+    args.scRNAseq_path = "./test_data/scRNA-seq"
 
 if not 0 <= args.min_cell <= 1:
     parser.error("min_cell must be between 0 and 1")
@@ -1182,6 +1214,8 @@ if args.block_size < 1:
     parser.error("block_size must be at least 1")
 if args.metacell_expr_threshold < 0:
     parser.error("metacell_expr_threshold must be non-negative")
+if not 0 <= args.metacell_min_expression_fraction <= 1:
+    parser.error("metacell_min_expression_fraction must be between 0 and 1")
 if args.ko_evidence_weight <= 0:
     parser.error("ko_evidence_weight must be positive")
 if any(weight < 0 for weight in (
@@ -1310,7 +1344,7 @@ for file in file_list:
         dict_gene = {}
         rejected_sample = 0
         spatial_neighbor_sender_types = {}
-        spatial_distant_sender_types = {}
+        spatial_all_sender_types = {}
         spatial_ligand_expression_counts = {
             "membrane": {},
             "secreted": {}
@@ -1367,7 +1401,7 @@ for file in file_list:
                     continue  # Skip to the next iteration of the loop
 
                 sample_neighbor_sender_types = {}
-                sample_distant_sender_types = {}
+                sample_all_sender_types = {}
                 sample_ligand_expression_counts = {
                     "membrane": {},
                     "secreted": {}
@@ -1385,12 +1419,11 @@ for file in file_list:
                     )
                     (
                         sample_neighbor_sender_types,
-                        sample_distant_sender_types,
-                        distant_indices_by_celltype
-                    ) = get_spatial_sender_type_sets(
+                        sample_all_sender_types,
+                        all_indices_by_celltype
+                    ) = get_proximal_and_all_sender_sets(
                         sub_adata,
                         neighbor_indices_by_celltype,
-                        cell_knn_indices,
                         celltype_key="celltype"
                     )
                     sample_ligand_expression_counts["membrane"] = (
@@ -1404,7 +1437,7 @@ for file in file_list:
                     sample_ligand_expression_counts["secreted"] = (
                         collect_spatial_ligand_expression_counts(
                             sub_adata,
-                            distant_indices_by_celltype,
+                            all_indices_by_celltype,
                             secreted_lg_set,
                             celltype_key="celltype"
                         )
@@ -1414,7 +1447,8 @@ for file in file_list:
                     sub_adata,
                     args.block_size,
                     expression_threshold=args.metacell_expr_threshold,
-                    clustering_obsm_key=(spatial_obsm_key if args.spatial else None)
+                    clustering_obsm_key=(spatial_obsm_key if args.spatial else None),
+                    min_expression_fraction=args.metacell_min_expression_fraction
                 )]
 
                 mean_sum = {}
@@ -1553,8 +1587,8 @@ for file in file_list:
                     if args.spatial:
                         for receiver_celltype, sender_types in sample_neighbor_sender_types.items():
                             spatial_neighbor_sender_types.setdefault(receiver_celltype, set()).update(sender_types)
-                        for receiver_celltype, sender_types in sample_distant_sender_types.items():
-                            spatial_distant_sender_types.setdefault(receiver_celltype, set()).update(sender_types)
+                        for receiver_celltype, sender_types in sample_all_sender_types.items():
+                            spatial_all_sender_types.setdefault(receiver_celltype, set()).update(sender_types)
                         for mode_name in ("membrane", "secreted"):
                             merge_ligand_expression_counts(
                                 spatial_ligand_expression_counts[mode_name],
@@ -1745,7 +1779,7 @@ for file in file_list:
                         pathway_modes.append(
                             ("membrane", membrane_lgrp_dict, membrane_ligands)
                         )
-                if sender_cell in spatial_distant_sender_types.get(receiver_cell, set()):
+                if sender_cell in spatial_all_sender_types.get(receiver_cell, set()):
                     secreted_ligands = spatial_ligands["secreted"].get(
                         (sender_cell, receiver_cell),
                         set()

@@ -67,7 +67,7 @@ The GitHub test datasets are stored directly in `test_data/scRNA-seq/` (`.h5ad`)
 
 Provide scRNA-seq data as an .h5ad (AnnData) file.
 
-- `adata.obs['celltype']` (required): used to infer bidirectional signaling pathways between any two cell types.
+- `adata.obs['celltype']` (required): cell-type annotations used to reconstruct networks and infer signaling pathways in both directions between `index_cell` and each other retained cell type.
 - `adata.obs['sample']` (optional): enables per-sample signaling inference. If multiple samples are present, SigFormer assumes the samples represent a similar biological state and integrates results into a cross-sample consensus. If `obs['sample']` is missing, SigFormer sets it to "merged" automatically.
 - `adata.var`: gene metadata used for gene filtering and highly variable gene (HVG) identification.
 - `adata.X`: expression matrix (sparse or dense).
@@ -97,9 +97,9 @@ Below are the parameters used to run the provided test datasets (human cancers),
 
 ### Required input files
 
-- **scRNAseq_path** (`str`, default: `None`). Path to scRNA-seq data (an `.h5ad` file, or a folder containing `.h5ad` files).
+- **scRNAseq_path** (`str`, default: `None`). Path to scRNA-seq data (an `.h5ad` file, or a folder containing `.h5ad` files). When omitted, the script uses `./test_data/scRNA-seq`.
 - **pathway_file** (`str`, default: `./reference_library/Intracellular_signaling.txt`). Curated intracellular signaling interactions.
-- **ligand_file** (`str`, default: `./reference_library/Ligand_secreted_and_membrane.txt`). Curated ligand–receptor pairs.
+- **ligand_file** (`str`, default: `./reference_library/Ligand_secreted_and_membrane.txt`). Curated ligand–receptor pairs used when `spatial=False`; spatial mode uses the separate membrane and secreted libraries below.
 
 ### Optional input files
 
@@ -113,7 +113,7 @@ Below are the parameters used to run the provided test datasets (human cancers),
 - **index_cell** (`str`, default: `Malignant`). Index cell type used as the reference for bidirectional pathway inference.
 - **min_cell** (`float`, default: `0.01`). Gene filtering threshold: minimum fraction of cells a gene must be expressed in.
 - **min_gene** (`float`, default: `0.01`). Cell filtering threshold: minimum fraction of genes a cell must express.
-- **min_cell_count** (`int`, default: `5`). Minimum cell count for each cell type (cell types below this are filtered out).
+- **min_cell_count** (`int`, default: `5`). Minimum cell count for each cell type. Filtering is also applied after compression: types with fewer than this number of metacells are excluded from network construction and training.
 - **normalize** (`bool`, default: `True`). Library-size normalization per cell.
 - **log_trans** (`bool`, default: `True`). Log-transform expression.
 - **hvg_top_gene** (`int`, default: `5000`). Number of highly variable genes (HVGs) used as background genes when `background_gene_set` is not provided.
@@ -122,14 +122,23 @@ Below are the parameters used to run the provided test datasets (human cancers),
 ### Spatial mode
 
 - **spatial** (`bool`, default: `False`). Enable spatial mode using a numeric spatial-like matrix in `adata.obsm`.
-- **knn** (`int`, default: `10`). Number of nearest neighbors identified for each cell before self and same-cell-type neighbors are excluded.
+- **knn** (`int`, default: `10`). Number of nearest other cells identified for each cell, followed by exclusion of same-cell-type neighbors. The remaining neighbors are not replenished, so fewer than `knn` cells may remain.
 - **membrane_ligand_file** (`str`, default: `./reference_library/Ligand_membrane.txt`). Membrane-bound ligand–receptor pairs used in spatial mode.
 - **secreted_ligand_file** (`str`, default: `./reference_library/Ligand_secreted.txt`). Secreted ligand–receptor pairs used in spatial mode.
-- **spatial_ligand_min_fraction** (`float`, default: `0.1`). A spatial ligand must be expressed in a fraction strictly greater than this value among the relevant neighboring or distant sender cells.
+- **spatial_ligand_min_fraction** (`float`, default: `0.1`). A ligand must have expression greater than zero in a fraction strictly greater than this threshold among the relevant sender cells: proximal sender cells for membrane-bound ligands, or all cells of the sender type for secreted ligands.
+
+For a sender A to receiver B pathway, spatial mode uses the following ligand-selection rules:
+
+- **Membrane-bound ligands:** use A cells in the union of B cells' filtered KNN neighborhoods. Each sender cell is counted once per sample, even if it neighbors multiple B cells.
+- **Secreted ligands:** use all retained A cells in the sample, including proximal and distal cells. Secreted ligands are not restricted to the distal region, and their sender population does not depend on `knn`.
+
+Spatial neighborhoods and ligand-expression counts are computed from preprocessed cells before metacell compression. Counts are pooled across accepted samples before applying the expression-fraction threshold. Candidates must belong to the selected background genes and the corresponding ligand–receptor library; spatial mode does not additionally require a ligand to belong to the sender's reconstructed network. Network construction and training use all retained populations, not only neighboring cells. If compression is triggered, spatial mode clusters cells within each type using their spatial embedding; nonspatial mode uses expression-based dimensionality reduction and clustering.
+
+With `spatial=False`, ligand selection instead uses the sender's reconstructed-network genes and the combined ligand–receptor library, without the spatial expression-fraction filter.
 
 ### Model training and network reconstruction
 
-- **classification_accuracy** (`float`, default: `0.8`). Threshold for cell classification; samples below this threshold may be rejected.
+- **classification_accuracy** (`float`, default: `0.8`). Minimum sample-level cell-classification accuracy. Samples below this threshold are excluded from integration and skip knockout analysis.
 - **ko_evidence_weight** (`float`, default: `1.0`). Weight assigned to the receptor-to-TF perturbation score in pathway evidence scores.
 - **ligand_evidence_weight** (`float`, default: `1.0`). Weight assigned to sender ligand protein abundance.
 - **receptor_evidence_weight** (`float`, default: `1.0`). Weight assigned to receiver receptor protein abundance.
@@ -138,7 +147,8 @@ Below are the parameters used to run the provided test datasets (human cancers),
 - **num_epochs** (`int`, default: `50`). Maximum number of training epochs; early stopping may terminate training sooner.
 - **learning_rate** (`float`, default: `0.0001`). Learning rate for model optimization.
 - **block_size** (`int`, default: `5000`). Target number of cell-type-stratified metacells used when a sample contains more cells than this value.
-- **metacell_expr_threshold** (`float`, default: `0.05`). After metacell aggregation, mean expression values below this threshold are reset to zero; use `0` to disable thresholding.
+- **metacell_expr_threshold** (`float`, default: `0.1`). After metacell aggregation, mean expression values below this threshold are reset to zero; use `0` to disable this filter. Values refer to the preprocessed expression scale.
+- **metacell_min_expression_fraction** (`float`, default: `0.1`). Minimum fraction of a metacell's original members that must have expression greater than zero for a gene to be retained (10% by default). The boundary is inclusive. Retained values remain means over all members, not just expressing members. Use `0` to disable this filter. Both metacell filters apply only when compression is triggered; these filters can change inferred networks and pathways.
 - **random_seed** (`int`, default: `43`). Random seed for reproducibility.
 
 **scRNA-seq inference example:**
@@ -177,10 +187,12 @@ SigFormer creates a `./result` folder in your current working directory containi
 
 Reconstructed cell-type networks are written to `result/<dataset>/cell_network/`. Existing results from earlier versions are not renamed automatically.
 
-Each pathway file is a tab-delimited text file, with one pathway per line and six columns: `Ligand, Receptor, Mediator, TF, Target, Evidence_score`. Rows are sorted by `Evidence_score` in descending order. In scRNA-seq-only results, `Evidence_score` equals the normalized receptor-to-TF knockout score. Raw knockout distances are first integrated across samples. After pathway inference, knockout scores are max-scaled across all pathways that will actually be written for the same receiver cell type; receptor self-effects, non-TF genes, and R-to-TF candidates that cannot form an inferred pathway do not contribute to the normalization maximum. In multi-omics results, `Evidence_score` is the available-modality weighted mean of the knockout score, sender ligand protein abundance, receiver receptor protein abundance, and receiver TF chromatin-binding potential. A missing modality is excluded from the denominator, whereas a feature not detected by an available modality receives a score of zero. Protein and chromatin-binding scores are max-scaled to `[0, 1]` within each cell type and input dataset. When several ligands share one inferred receptor-to-TF cascade and sender proteomics is available, every ligand with positive protein abundance is written as a separate row and scored with its own abundance. Undetected or zero-abundance ligands remain grouped in one semicolon-delimited row with a ligand score of zero.
+scRNA-seq pathway files are written to `result/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `result/<dataset>/multiomics-supported/`; a cell-pair output is written only when at least one inferred ligand, receptor, or TF matches positive normalized multi-omics evidence. Multi-omics evidence reranks pathways rather than pruning them.
 
-`Mediator` encodes one or more shortest paths linking receptors to TFs:
-- Multiple shortest paths of equal length are separated by semicolons `;`.
+Each pathway file is a tab-delimited text file, with one pathway per line and six columns: `Ligand, Receptor, Mediator, TF, Target, Evidence_score`. Rows are sorted by `Evidence_score` in descending order. In scRNA-seq-only results, `Evidence_score` equals the normalized receptor-to-TF knockout score. Raw knockout distances are first integrated across samples. After pathway inference, knockout scores are max-scaled across all pathways that will actually be written for the same receiver cell type; receptor self-effects, non-TF genes, and R-to-TF candidates that cannot form an inferred pathway do not contribute to the normalization maximum. In multi-omics results, `Evidence_score` is the available-modality weighted mean of the knockout score, sender ligand protein abundance, receiver receptor protein abundance, and receiver TF chromatin-binding potential. A missing modality is excluded from the denominator, whereas a feature not detected by an available modality receives a score of zero. Protein and chromatin-binding scores are min–max normalized to `[0, 1]` within each cell type and input dataset, without clipping negative input scores beforehand. If all scores are identical, they map to 1 when their common value is nonzero, or to 0 when all scores are zero. When several ligands share one inferred receptor-to-TF cascade and sender proteomics is available, every ligand with positive protein abundance is written as a separate row and scored with its own abundance. Undetected or zero-abundance ligands remain grouped in one semicolon-delimited row with a ligand score of zero.
+
+`Mediator` encodes the intermediate genes of one or more minimum-cost directed paths linking receptors to TFs. Weighted Dijkstra uses an edge cost of `0.5 - log(p)`, where `p` is the reconstructed edge weight clipped to `[1e-12, 1]`:
+- Parallel paths with the same minimum total cost are separated by semicolons `;` (up to 100 paths per receptor–TF pair). They need not have the same number of edges.
 - Consecutive mediator genes within one path are separated by ASCII arrows `->`.
 - Underscores remain part of gene names and are not treated as delimiters.
 
