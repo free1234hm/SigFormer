@@ -107,26 +107,29 @@ def csnet(adata, activated_genes, path_matrix, pathway_type=None):
 
     result: list[coo_matrix] = []
     sum_net = coo_matrix((n1, n1), dtype=int)
+    # Only curated edges can survive the original dense co-expression mask.
+    curated = path_matrix.tocsr(copy=True)
+    curated.sum_duplicates()
+    curated.eliminate_zeros()
+    curated = curated.tocoo()
+    nonself = curated.row != curated.col
+    candidate_rows = curated.row[nonself]
+    candidate_cols = curated.col[nonself]
     for k in range(n2):
         gene_set = np.asarray(list(activated_genes[k]), dtype=int)
-        csn = np.zeros((n1, n1))
-        for i in gene_set:
-            for j in gene_set:
-                if j != i and data[i, k] > 0 and data[j, k] > 0:
-                    csn[i, j] = 1
-        csn = csr_matrix(csn)
+        active = np.zeros(n1, dtype=bool)
+        active[gene_set] = data[gene_set, k] > 0
+        keep = active[candidate_rows] & active[candidate_cols]
 
         print("\r", end="")
         print(f"Cell-specific network inference: {k+1} / {n2}", end="")
         sys.stdout.flush()
         # time.sleep(0.1)
 
-        # direct interactions
-        union = csn.multiply(path_matrix).tocoo()
-
-        # mask = union.col > union.row
-        # transformed = coo_matrix((union.data[mask], (union.row[mask], union.col[mask])), shape=union.shape)
-        transformed = coo_transform(union)
+        transformed = coo_matrix(
+            (np.ones(int(keep.sum()), dtype=int),
+             (candidate_rows[keep], candidate_cols[keep])), shape=(n1, n1)
+        )
         result.append(transformed)
         sum_net += transformed
     print()
@@ -146,7 +149,9 @@ def csnet(adata, activated_genes, path_matrix, pathway_type=None):
 
     # Map each edge key to its global position in sum_net.
     # The key is a tuple: (row, col).
-    global_edge_map = {(r, c): idx for idx, (r, c) in enumerate(zip(sum_rows, sum_cols))}
+    global_keys = sum_rows.astype(np.int64) * n1 + sum_cols
+    global_order = np.argsort(global_keys)
+    sorted_keys = global_keys[global_order]
 
     data_list = []
 
@@ -154,17 +159,13 @@ def csnet(adata, activated_genes, path_matrix, pathway_type=None):
         feature = torch.tensor(data[:, k].reshape(n1, 1), dtype=torch.float)
 
         net = result[k]
-        # All edges in the current sparse net.
-        net_edges = zip(net.row, net.col)
-
         # Initialize edge_attr with zeros.
         # Use float32 to reduce memory usage.
         edge_attr = torch.zeros(len(sum_rows), dtype=torch.float)
 
-        # Mark each current cell-net edge in the global map.
-        for (r, c) in net_edges:
-            if (r, c) in global_edge_map:
-                edge_attr[global_edge_map[(r, c)]] = 1.0
+        net_keys = net.row.astype(np.int64) * n1 + net.col
+        positions = global_order[np.searchsorted(sorted_keys, net_keys)]
+        edge_attr[torch.from_numpy(positions)] = 1.0
 
         label = torch.tensor(cell_ids.iloc[k], dtype=torch.long)
 

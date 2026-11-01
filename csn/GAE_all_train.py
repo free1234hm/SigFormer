@@ -6,6 +6,7 @@
 import os
 import random
 import math
+import time
 import pandas as pd
 import numpy as np
 import torch
@@ -13,6 +14,7 @@ import torch.nn.functional as F
 from scipy.sparse import coo_matrix
 from torch_geometric.nn import TransformerConv
 from sklearn.metrics import accuracy_score, f1_score
+from csn.training_cache import TrainingGraphCache
 
 
 # output_dir = "./perturbation_debug"
@@ -85,6 +87,49 @@ class DirectedRelationDecoder(torch.nn.Module):
     def project_nodes(self, z):
         return self.source_projection(z), self.target_projection(z)
 
+    def project_relations(self, relation_types, z):
+        relations = relation_types.to(device=z.device, dtype=z.dtype)
+        weights = relations / relations.sum(dim=1, keepdim=True).clamp_min(1.0)
+        return (1.0 + torch.tanh(self.relation_projection(weights)),
+                self.relation_bias(weights).squeeze(1))
+
+    def _compute_layout_components(
+        self, z, edge_index, layout, projected_source_z, projected_target_z,
+        projected_relations
+    ):
+        if projected_source_z is None or projected_target_z is None:
+            projected_source_z, projected_target_z = self.project_nodes(z)
+        if projected_relations is None:
+            projected_relations = self.project_relations(layout.relation_types, z)
+        gates, biases = projected_relations
+        gate = gates.index_select(0, layout.type_index)
+        bias = biases.index_select(0, layout.type_index)
+        src, dst = edge_index[0], edge_index[1]
+        inner = (z.index_select(0, src) * z.index_select(0, dst)).sum(dim=1)
+        residual = (
+            projected_source_z.index_select(0, src)
+            * projected_target_z.index_select(0, dst) * gate
+        ).sum(dim=1) / math.sqrt(self.latent_channels) + bias
+        paired = layout.paired_index
+        if paired.numel() > 0:
+            averaged = 0.5 * (residual.index_select(0, paired)
+                              + residual.index_select(0, layout.reverse_index))
+            residual = residual.index_copy(0, paired, averaged)
+        symmetric = layout.unpaired_index
+        # The number of symmetric edges is known from cached CPU metadata.
+        if symmetric.numel() > 0:
+            reverse = (
+                projected_source_z.index_select(0, dst.index_select(0, symmetric))
+                * projected_target_z.index_select(0, src.index_select(0, symmetric))
+                * gate.index_select(0, symmetric)
+            ).sum(dim=1) / math.sqrt(self.latent_channels) + bias.index_select(0, symmetric)
+            averaged = 0.5 * (residual.index_select(0, symmetric) + reverse)
+            residual = residual.index_copy(0, symmetric, averaged)
+        adjustment = self.max_residual_adjustment * torch.tanh(
+            self.residual_scale * residual / self.max_residual_adjustment
+        )
+        return inner + adjustment, inner, adjustment
+
     def compute_logit_components(
         self,
         z,
@@ -92,8 +137,15 @@ class DirectedRelationDecoder(torch.nn.Module):
         edge_relation_attr=None,
         edge_symmetric_mask=None,
         projected_source_z=None,
-        projected_target_z=None
+        projected_target_z=None,
+        relation_layout=None,
+        projected_relations=None
     ):
+        if relation_layout is not None:
+            return self._compute_layout_components(
+                z, edge_index, relation_layout, projected_source_z,
+                projected_target_z, projected_relations
+            )
         num_edges = edge_index.shape[1]
         if edge_relation_attr is None:
             edge_relation_attr = torch.ones(
@@ -169,7 +221,9 @@ class DirectedRelationDecoder(torch.nn.Module):
         edge_symmetric_mask=None,
         sigmoid=True,
         projected_source_z=None,
-        projected_target_z=None
+        projected_target_z=None,
+        relation_layout=None,
+        projected_relations=None
     ):
         logits, _, _ = self.compute_logit_components(
             z,
@@ -177,7 +231,9 @@ class DirectedRelationDecoder(torch.nn.Module):
             edge_relation_attr,
             edge_symmetric_mask,
             projected_source_z,
-            projected_target_z
+            projected_target_z,
+            relation_layout,
+            projected_relations
         )
         return torch.sigmoid(logits) if sigmoid else logits
 
@@ -209,7 +265,9 @@ class GraphAutoencoder(torch.nn.Module):
         edge_symmetric_mask=None,
         sigmoid=True,
         projected_source_z=None,
-        projected_target_z=None
+        projected_target_z=None,
+        relation_layout=None,
+        projected_relations=None
     ):
         return self.decoder(
             z,
@@ -218,7 +276,9 @@ class GraphAutoencoder(torch.nn.Module):
             edge_symmetric_mask,
             sigmoid=sigmoid,
             projected_source_z=projected_source_z,
-            projected_target_z=projected_target_z
+            projected_target_z=projected_target_z,
+            relation_layout=relation_layout,
+            projected_relations=projected_relations
         )
 
     def forward(
@@ -229,7 +289,9 @@ class GraphAutoencoder(torch.nn.Module):
         edge_relation_attr_0=None,
         edge_relation_attr_1=None,
         edge_symmetric_mask_0=None,
-        edge_symmetric_mask_1=None
+        edge_symmetric_mask_1=None,
+        relation_layouts=None,
+        edge_output_indices=None
     ):
         z = self.encode(x, train_edge_index_1)
 
@@ -239,6 +301,23 @@ class GraphAutoencoder(torch.nn.Module):
         y2 = F.relu(self.fc1(y1_1))
         y = self.fc2(y2)
         projected_source_z, projected_target_z = self.decoder.project_nodes(z)
+        layout_0, layout_1 = (None, None) if relation_layouts is None else relation_layouts
+        # Recompute learned projections at every forward/optimizer step.
+        relations_0 = None if layout_0 is None else self.decoder.project_relations(layout_0.relation_types, z)
+        relations_1 = None
+        if layout_1 is not None:
+            relations_1 = (relations_0 if layout_0 is not None and
+                           layout_0.relation_types is layout_1.relation_types else
+                           self.decoder.project_relations(layout_1.relation_types, z))
+
+        if edge_output_indices is not None:
+            logits = self.decode(
+                z, train_edge_index_0, sigmoid=False,
+                projected_source_z=projected_source_z, projected_target_z=projected_target_z,
+                relation_layout=layout_0, projected_relations=relations_0
+            )
+            return (logits.index_select(0, edge_output_indices[0]),
+                    logits.index_select(0, edge_output_indices[1]), z, y)
 
         adj_reconstructed_0 = self.decode(
             z,
@@ -247,7 +326,9 @@ class GraphAutoencoder(torch.nn.Module):
             edge_symmetric_mask_0,
             sigmoid=False,
             projected_source_z=projected_source_z,
-            projected_target_z=projected_target_z
+            projected_target_z=projected_target_z,
+            relation_layout=layout_0,
+            projected_relations=relations_0
         )
         adj_reconstructed_1 = self.decode(
             z,
@@ -256,7 +337,9 @@ class GraphAutoencoder(torch.nn.Module):
             edge_symmetric_mask_1,
             sigmoid=False,
             projected_source_z=projected_source_z,
-            projected_target_z=projected_target_z
+            projected_target_z=projected_target_z,
+            relation_layout=layout_1,
+            projected_relations=relations_1
         )
         return adj_reconstructed_0, adj_reconstructed_1, z, y
 
@@ -354,7 +437,8 @@ def evaluate_model(
     criterion_1,
     criterion_2,
     split_name='Train',
-    classification_weight=1.0
+    classification_weight=1.0,
+    graph_cache=None
 ):
     model.eval()
     y_true, y_pred = [], []
@@ -362,51 +446,45 @@ def evaluate_model(
     total_reconstruction_loss = 0
     total_classification_loss = 0
     valid_count = 0
+    loss_rows = []
+    predictions = []
+    targets = []
+    if graph_cache is None:
+        graph_cache = TrainingGraphCache(device, compact_relations=True)
 
     with torch.no_grad():
         for data in data_list:
-            train_edge_index_0, mask_0 = filter_edges_by_weight(data.edge_index, data.edge_attr, 0)
-            train_edge_index_1, mask_1 = filter_edges_by_weight(data.edge_index, data.edge_attr, 1)
-
-            if train_edge_index_0.shape[1] > 1 and train_edge_index_1.shape[1] > 1:
-                x = data.x.to(device)
-                target = data.y.view(-1)
-                y_true.append(target.cpu().numpy())
-                edge_relation_attr_0 = get_edge_relation_attr(data, mask_0)
-                edge_relation_attr_1 = get_edge_relation_attr(data, mask_1)
-                edge_symmetric_mask_0 = get_edge_symmetric_mask(data, mask_0)
-                edge_symmetric_mask_1 = get_edge_symmetric_mask(data, mask_1)
-
+            prepared = graph_cache.get(data)
+            if prepared.valid:
+                edge_attr_0, edge_attr_1, target = prepared.targets
                 recon_adj_0, recon_adj_1, z, y = model(
-                    x,
-                    train_edge_index_0.to(device),
-                    train_edge_index_1.to(device),
-                    edge_relation_attr_0.to(device),
-                    edge_relation_attr_1.to(device),
-                    edge_symmetric_mask_0.to(device),
-                    edge_symmetric_mask_1.to(device)
+                    *prepared.inputs, **prepared.decoder_kwargs
                 )
 
                 recon_adj_0 = recon_adj_0.squeeze()
                 recon_adj_1 = recon_adj_1.squeeze()
-                edge_attr_0 = data.edge_attr[mask_0]
-                edge_attr_1 = data.edge_attr[mask_1]
-
                 reconstruction_loss = (
                     0.5 * criterion_0(recon_adj_0, edge_attr_0.to(device)) +
                     0.5 * criterion_1(recon_adj_1, edge_attr_1.to(device))
                 )
                 classification_loss = criterion_2(y, target.to(device))
                 loss = reconstruction_loss + classification_weight * classification_loss
-                total_loss += loss.item()
-                total_reconstruction_loss += reconstruction_loss.item()
-                total_classification_loss += classification_loss.item()
+                loss_rows.append(torch.stack((loss, reconstruction_loss, classification_loss)))
                 valid_count += 1
-                y_pred.append(y.argmax(dim=1).cpu().numpy())
+                predictions.append(y.argmax(dim=1))
+                targets.append(target)
 
     if valid_count == 0:
         print(f'{split_name} Loss: inf (no valid samples)')
         return float('inf'), float('inf'), float('inf'), 0.0, 0.0, 0.0, 0.0
+
+    # Preserve the original Python summation order without per-cell GPU syncs.
+    for loss, reconstruction_loss, classification_loss in torch.stack(loss_rows).cpu().tolist():
+        total_loss += loss
+        total_reconstruction_loss += reconstruction_loss
+        total_classification_loss += classification_loss
+    y_true = [torch.cat(targets).cpu().numpy()]
+    y_pred = [torch.cat(predictions).cpu().numpy()]
 
     avg_loss = total_loss / valid_count
     avg_reconstruction_loss = total_reconstruction_loss / valid_count
@@ -1012,12 +1090,23 @@ def graph_processing(
     best_epoch = -1
     best_model_state = None
     count_no_improve = 0
+    graph_cache = TrainingGraphCache(device, compact_relations=True)
+    candidate_edges = data_list[0].edge_index.shape[1]
+    mean_positive_edges = np.mean([
+        int((data.edge_attr == 1).sum()) for data in data_list
+    ])
+    print(
+        f"Training on {device}: {len(data_list)} cell graphs; "
+        f"first-graph candidate edges={candidate_edges}; "
+        f"mean positive edges={mean_positive_edges:.1f}"
+    )
 
     # =========================
     # Keep the original training flow.
     # Training still applies the edge_index_0 / edge_index_1 dual filtering.
     # =========================
     for epoch in range(num_epochs):
+        epoch_start = time.perf_counter()
         model.train()
         print('epoch: %d' % epoch)
 
@@ -1026,33 +1115,16 @@ def graph_processing(
 
         for data_index in epoch_indices:
             data = data_list[data_index]
-            train_edge_index_0, mask_0 = filter_edges_by_weight(data.edge_index, data.edge_attr, 0)
-            train_edge_index_1, mask_1 = filter_edges_by_weight(data.edge_index, data.edge_attr, 1)
-
-            if train_edge_index_0.shape[1] > 1 and train_edge_index_1.shape[1] > 1:
+            prepared = graph_cache.get(data)
+            if prepared.valid:
                 optimizer.zero_grad()
-
-                x = data.x.to(device)
-                edge_relation_attr_0 = get_edge_relation_attr(data, mask_0)
-                edge_relation_attr_1 = get_edge_relation_attr(data, mask_1)
-                edge_symmetric_mask_0 = get_edge_symmetric_mask(data, mask_0)
-                edge_symmetric_mask_1 = get_edge_symmetric_mask(data, mask_1)
                 recon_adj_0, recon_adj_1, z, y = model(
-                    x,
-                    train_edge_index_0.to(device),
-                    train_edge_index_1.to(device),
-                    edge_relation_attr_0.to(device),
-                    edge_relation_attr_1.to(device),
-                    edge_symmetric_mask_0.to(device),
-                    edge_symmetric_mask_1.to(device)
+                    *prepared.inputs, **prepared.decoder_kwargs
                 )
 
                 recon_adj_0 = recon_adj_0.squeeze()
                 recon_adj_1 = recon_adj_1.squeeze()
-                edge_attr_0 = data.edge_attr[mask_0]
-                edge_attr_1 = data.edge_attr[mask_1]
-
-                target = data.y.view(-1)
+                edge_attr_0, edge_attr_1, target = prepared.targets
                 loss_0 = criterion_0(recon_adj_0, edge_attr_0.to(device))
                 loss_1 = criterion_1(recon_adj_1, edge_attr_1.to(device))
                 loss_2 = criterion_2(y, target.to(device))
@@ -1061,6 +1133,10 @@ def graph_processing(
                 loss.backward()
                 optimizer.step()
 
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        training_seconds = time.perf_counter() - epoch_start
+        evaluation_start = time.perf_counter()
         (
             total_loss,
             reconstruction_loss,
@@ -1077,7 +1153,12 @@ def graph_processing(
             criterion_1,
             criterion_2,
             split_name='Train',
-            classification_weight=classification_weight
+            classification_weight=classification_weight,
+            graph_cache=graph_cache
+        )
+        print(
+            f"Epoch timing: train={training_seconds:.2f}s, "
+            f"evaluation={time.perf_counter() - evaluation_start:.2f}s"
         )
 
         if total_loss < min_loss - min_delta:
@@ -1099,6 +1180,7 @@ def graph_processing(
             )
             break
 
+    graph_cache.clear()
     if best_model_state is not None:
         model.load_state_dict({
             key: value.to(device)
