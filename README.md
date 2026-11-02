@@ -108,6 +108,10 @@ Below are the parameters used to run the provided test datasets (human cancers),
 - **retained_cell_types** (`str`, default: `None`). Optional TXT, TSV, or CSV file with one cell-type name per line or in the first column, matching `obs['celltype']` exactly (including spaces). The list must include `index_cell` and at least one other type. Omit it or pass an empty string to retain all annotated types, subject to quality and cell-count filters. Selection precedes per-sample preprocessing and HVG selection, so it can affect the selected HVGs.
 - **background_gene_set** (`str`, default: `None`). Optional TXT, TSV, or CSV file whose first column contains custom background genes, such as genes of interest or user-derived differentially expressed genes. This set replaces HVG selection and is not capped by `hvg_top_gene`; genes must match `adata.var_names` and survive gene filtering. When omitted, the background is selected using `hvg_top_gene`.
 
+### Output directory
+
+- **output_dir** (`str`, default: `./results`). Root directory for all outputs, including reconstructed networks, scRNA-seq pathways, and multi-omics rescored pathways. Each input dataset has its own subfolder. Relative paths are resolved from the current working directory; absolute paths are also supported. Missing output folders are created automatically. For example, use `--output_dir /results` in Code Ocean, or `--output_dir "./my results"` for a path containing spaces.
+
 ### Data preprocessing
 
 - **index_cell** (`str`, default: `Malignant`). Index cell type used as the reference for bidirectional pathway inference.
@@ -175,15 +179,15 @@ python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Br
 
 ## 4. Check Results
 
-SigFormer creates a `./results` folder in your current working directory containing inferred pathway files, including:
+SigFormer writes to `--output_dir` (default: `./results` in your current working directory), containing inferred pathway files including:
 
 - `index_cell_to_cell_pathway.txt`: signaling pathways from the index cell type to a non-index cell type.
 - `cell_to_index_cell_pathway.txt`: signaling pathways from a non-index cell type to the index cell type.
 - ...
 
-Reconstructed cell-type networks are written to `results/<dataset>/cell_network/`. Existing results from earlier versions are not renamed automatically.
+Reconstructed cell-type networks are written to `<output_dir>/<dataset>/cell_network/`. Existing results from earlier versions are not renamed or moved automatically.
 
-scRNA-seq pathway files are written to `results/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `results/<dataset>/multiomics-supported/`; a cell-pair output is written only when at least one inferred ligand, receptor, or TF matches positive normalized multi-omics evidence. Multi-omics evidence reranks pathways rather than pruning them.
+scRNA-seq pathway files are written to `<output_dir>/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `<output_dir>/<dataset>/multiomics-supported/`; a cell-pair output is written only when at least one inferred ligand, receptor, or TF matches positive normalized multi-omics evidence. Multi-omics evidence reranks pathways rather than pruning them.
 
 Each pathway file is a tab-delimited text file, with one pathway per line and six columns: `Ligand, Receptor, Mediator, TF, Target, Evidence_score`. Rows are sorted by `Evidence_score` in descending order.
 
