@@ -220,7 +220,7 @@ python Reproduce_Figure2_benchmark.py > Figure2_benchmark.txt
 
 ### Figure 3: spatial versus nonspatial inference
 
-Download the eight BCC regions from figshare and place their `.h5ad` files in `./spatial_transcriptomics`. Run nonspatial inference and spatial inference with kNN = 5, 10 and 20, keeping outputs separate:
+The `.h5ad` files for the eight BCC regions are provided in `./spatial_transcriptomics` within the figshare benchmark bundle. Run nonspatial inference and spatial inference with kNN = 5, 10 and 20, keeping outputs separate:
 
 ```bash
 python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial False --output_dir /results/figure3/nospatial
