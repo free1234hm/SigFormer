@@ -200,7 +200,58 @@ In scRNA-seq-only results, `Evidence_score` equals the normalized receptor-to-TF
 
 For example, `AKT1->MAPK1;PIK3CA->AKT1->MAPK1` represents two parallel receptor-to-TF cascades. An empty `Mediator` value indicates a direct receptor-to-TF edge without an intermediate signaling molecule.
 
-## 5. Running Time
+## 5. Reproduce SigFormer's Benchmark Results
+
+Benchmark datasets, precomputed predictions from SigFormer and 15 competing methods, and evaluation scripts are available on [figshare](https://doi.org/10.6084/m9.figshare.34886376). Run inference commands from the SigFormer project directory. Run the evaluation scripts from inside the downloaded `Reproduce_benchmark` directory, following its README for dependencies and input-folder layout.
+
+### Figure 2: comparison with existing methods
+
+The default command analyzes all 16 cancer scRNA-seq datasets and saves inference outputs to `/results`:
+
+```bash
+python SigFormer_main.py
+```
+
+Use the supplied precomputed predictions, or replace the corresponding benchmark inputs with the regenerated outputs. Then calculate recall, precision and F1 scores for LR pairs, TF–target pairs and complete L–R–TF–target pathways, as applicable to each method:
+
+```bash
+python Reproduce_Figure2_benchmark.py > Figure2_benchmark.txt
+```
+
+### Figure 3: spatial versus nonspatial inference
+
+Download the eight BCC regions from figshare and place their `.h5ad` files in `./spatial_transcriptomics`. Run nonspatial inference and spatial inference with kNN = 5, 10 and 20, keeping outputs separate:
+
+```bash
+python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial False --output_dir /results/figure3/nospatial
+python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 5 --output_dir /results/figure3/spatial_knn5
+python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 10 --output_dir /results/figure3/spatial_knn10
+python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 20 --output_dir /results/figure3/spatial_knn20
+```
+
+Evaluate the supplied or regenerated predictions using the script below. Select the secreted or membrane-bound LR reference as described in the benchmark README to reproduce each ligand-class comparison:
+
+```bash
+python Reproduce_Figure3_benchmark.py > Figure3_benchmark.txt
+```
+
+### Figure 4: multi-omics rescoring
+
+For each cancer dataset, provide the available cancer-matched scATAC-seq and/or scProteomics evidence. For example:
+
+```bash
+python SigFormer_main.py --scRNAseq_path ./test_data/scRNA-seq/Data_Chung2017_Breast_all.h5ad --scProteomics_path ./test_data/scProteomics/Breast_cancer.txt --scATACseq_path ./test_data/scATAC-seq/Breast_cancer.tsv --output_dir /results/figure4
+```
+
+Repeat for the 16 datasets where evidence is available. The figshare evaluation bundle provides these outputs in its expected folder layout; regenerated outputs can replace the matching inputs.
+
+```bash
+python Reproduce_Figure4_benchmark.py
+```
+
+This script compares scRNA-seq-inferred rankings with scATAC-seq-rescored TFs, scProteomics-rescored ligands and receptors, and jointly rescored L–R–TF triplets using recall@K, precision@K and average precision (AP). It saves per-dataset and pooled results, skipping unavailable modalities.
+
+## 6. Running Time
 
 SigFormer is an end-to-end framework integrating cell-specific network construction, graph representation learning, network reconstruction, and in silico receptor knockout analysis. The runtimes below measure the complete workflow, rather than only model training or pathway inference. To improve computational efficiency, SigFormer uses sparse matrix operations where possible and GPU acceleration for graph representation learning. Large samples are compressed into cell-type-stratified metacells before network construction and model training, with a target size controlled by `--block_size` (default: 5,000).
 
