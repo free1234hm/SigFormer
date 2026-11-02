@@ -110,7 +110,7 @@ Below are the parameters used to run the provided test datasets (human cancers),
 
 ### Output directory
 
-- **output_dir** (`str`, default: `./results`). Root directory for all outputs, including reconstructed networks, scRNA-seq pathways, and multi-omics rescored pathways. Each input dataset has its own subfolder. Relative paths are resolved from the current working directory; absolute paths are also supported. Missing output folders are created automatically. For example, use `--output_dir /results` in Code Ocean, or `--output_dir "./my results"` for a path containing spaces.
+- **output_dir** (`str`, default: `./results`). Root directory for all outputs, including reconstructed networks, scRNA-seq pathways, and multi-omics rescored pathways.
 
 ### Data preprocessing
 
@@ -187,7 +187,7 @@ SigFormer writes to `--output_dir` (default: `./results` in your current working
 
 Reconstructed cell-type networks are written to `<output_dir>/<dataset>/cell_network/`. Existing results from earlier versions are not renamed or moved automatically.
 
-scRNA-seq pathway files are written to `<output_dir>/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `<output_dir>/<dataset>/multiomics-supported/`; a cell-pair output is written only when at least one inferred ligand, receptor, or TF matches positive normalized multi-omics evidence. Multi-omics evidence reranks pathways rather than pruning them.
+scRNA-seq pathway files are written to `<output_dir>/<dataset>/scRNAseq-inferred/`. With `spatial=True`, membrane-bound and secreted pathways are saved separately in its `membrane-mediated/` and `secreted-mediated/` subfolders. Multi-omics rescored files use the corresponding layout under `<output_dir>/<dataset>/multiomics-supported/`.
 
 Each pathway file is a tab-delimited text file, with one pathway per line and six columns: `Ligand, Receptor, Mediator, TF, Target, Evidence_score`. Rows are sorted by `Evidence_score` in descending order.
 
