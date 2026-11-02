@@ -1126,8 +1126,10 @@ def score_pathway_with_multiomics(
 
 
 parser = argparse.ArgumentParser(description='Main entrance of SigFormer')
-parser.add_argument('--scRNAseq_path', type=str, default=None,
+parser.add_argument('--scRNAseq_path', type=str, default='./test_data/scRNA-seq',
                     help='the path of scRNA-seq data')
+parser.add_argument('--output_dir', type=str, default='./results',
+                    help='root directory for all dataset results (default: ./results)')
 parser.add_argument('--scProteomics_path', type=str, default=None,
                     help='tab-delimited scProteomics file: celltype, protein, optional Score')
 parser.add_argument('--scATACseq_path', type=str, default=None,
@@ -1185,8 +1187,10 @@ parser.add_argument('--metacell_min_expression_fraction', type=float, default=0.
 parser.add_argument('--random_seed', type=int, default=43, help='random seed')
 args = parser.parse_args()
 
-if args.scRNAseq_path is None:
-    args.scRNAseq_path = "./test_data/scRNA-seq"
+if not args.output_dir.strip():
+    parser.error("output_dir must not be empty")
+if Path(args.output_dir).exists() and not Path(args.output_dir).is_dir():
+    parser.error("output_dir must be a directory, not a file")
 
 if not 0 <= args.min_cell <= 1:
     parser.error("min_cell must be between 0 and 1")
@@ -1654,7 +1658,7 @@ for file in file_list:
                 for mode_name in ("membrane", "secreted")
             }
 
-        recon_dir0 = f'./results/{file.stem}/cell_network'
+        recon_dir0 = os.path.join(args.output_dir, file.stem, 'cell_network')
         save_cell_specific_networks(final_matrix, unified_gene_list, recon_dir0)
 
         all_perturbation_results = integrate_multiple_dicts(all_perturbation_results)
@@ -1726,8 +1730,8 @@ for file in file_list:
             tftg_final[cell] = adj_tftg
             pathway_final[cell] = adj_pathway
 
-        inferred_root = f'./results/{file.stem}/scRNAseq-inferred'
-        multiomics_root = f'./results/{file.stem}/multiomics-supported'
+        inferred_root = os.path.join(args.output_dir, file.stem, 'scRNAseq-inferred')
+        multiomics_root = os.path.join(args.output_dir, file.stem, 'multiomics-supported')
         has_multiomics = (
             bool(set(dict_gene) & set(dict_Proteomics))
             or bool(set(dict_gene) & set(dict_ATACseq))
