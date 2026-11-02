@@ -206,7 +206,7 @@ Benchmark datasets, precomputed predictions from SigFormer and 15 competing meth
 
 ### Figure 2: comparison with existing methods
 
-The default command analyzes all 16 cancer scRNA-seq datasets and saves inference outputs to `/results`:
+When `--scRNAseq_path` is not specified, the default command analyzes all 16 cancer scRNA-seq datasets and saves inference outputs to `/results`:
 
 ```bash
 python SigFormer_main.py
