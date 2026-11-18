@@ -220,20 +220,24 @@ python Reproduce_Figure2_benchmark.py > Figure2_benchmark.txt
 
 ### Figure 3: spatial versus nonspatial inference
 
-The `.h5ad` files for the eight BCC regions are provided in `./spatial_transcriptomics` within the figshare benchmark bundle. Run nonspatial inference and spatial inference with kNN = 5, 10 and 20, keeping outputs separate:
+To reproduce the Figure 3 metrics from the supplied predictions, run the following command once from a writable copy of `Reproduce_benchmark/`:
+
+```bash
+python Reproduce_Figure3_benchmark.py
+```
+
+The script applies both ligand–receptor references automatically and writes `spatial_mode_results/membrane.txt` (nonspatial plus three spatial configurations) and `spatial_mode_results/secreted.txt` (nonspatial plus `all_secreted` and `distal_secreted` at each of the three kNN values).
+
+The `.h5ad` files for the eight BCC regions are provided in `./spatial_transcriptomics` within the Figshare benchmark bundle. To optionally regenerate predictions, run nonspatial inference and spatial inference with kNN = 5, 10 and 20, keeping outputs separate:
 
 ```bash
 python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial False --output_dir /results/figure3/nospatial
-python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 5 --output_dir /results/figure3/spatial_knn5
-python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 10 --output_dir /results/figure3/spatial_knn10
-python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 20 --output_dir /results/figure3/spatial_knn20
+python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 5 --output_dir /results/figure3/spatial_knn_5
+python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 10 --output_dir /results/figure3/spatial_knn_10
+python SigFormer_main.py --scRNAseq_path ./spatial_transcriptomics --spatial True --knn 20 --output_dir /results/figure3/spatial_knn_20
 ```
 
-Evaluate the supplied or regenerated predictions using the script below. Select the secreted or membrane-bound LR reference as described in the benchmark README to reproduce each ligand-class comparison:
-
-```bash
-python Reproduce_Figure3_benchmark.py > Figure3_benchmark.txt
-```
+To evaluate regenerated predictions, replace the corresponding pathway files in a **copy** of `spatial_mode_results/`. For each Area, place nonspatial files from `scRNAseq-inferred/` directly in `nospatial/<Area>/`. Under `spatial_knn_<k>/<Area>/`, place files from `scRNAseq-inferred/membrane-mediated/` in `membrane/` and from `scRNAseq-inferred/secreted-mediated/` in `all_secreted/`. The current inference script uses all sender cells for secreted ligands; it does not generate the distal-only comparison. Keep the supplied `distal_secreted/` predictions for that branch.
 
 ### Figure 4: multi-omics rescoring
 
